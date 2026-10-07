@@ -17,12 +17,14 @@ import hid
 
 VID, PID, USAGE_PAGE = 0x320F, 0x5055, 0xFF1C
 _SAVED_CFG = Path(os.environ["APPDATA"]) / "ardor-rgb" / "hw_config.bin"
+_EXIT_CFG = _SAVED_CFG.with_name("exit_config.bin")     # last mode we left the keyboard in ourselves
 # static blue in "custom" mode, captured from the vendor app; used if nothing better is known
 _FALLBACK_CFG = bytes.fromhex("00 13 04 00 00 00 31 53 ff 08 00 00 00 00 00 00 00 00 02 00 01").ljust(0x22, b"\0")
 N_LEDS = 128
 FRAME = N_LEDS * 3
 MODE_STREAM = 0xFE
 MODE_OFF = 0x14                 # "off" in the vendor app's mode list
+MODE_WAVE, MODE_BREATHE, MODE_STATIC, MODE_CUSTOM = 0x01, 0x05, 0x06, 0x13
 CHUNK = 0x38
 
 
@@ -62,11 +64,11 @@ class Keyboard:
         cfg = self.read_config()
         if known is not None:
             self.saved = known
-        elif cfg[1] not in (MODE_STREAM, MODE_OFF):
+        elif cfg[1] not in (MODE_STREAM, MODE_OFF) and not (_EXIT_CFG.exists() and cfg == _EXIT_CFG.read_bytes()):
             self.saved = cfg
             _SAVED_CFG.parent.mkdir(parents=True, exist_ok=True)
             _SAVED_CFG.write_bytes(cfg)
-        else:                              # left in stream/off mode by us earlier: use the last real mode
+        else:                              # left in stream/off/exit mode by us earlier: use the last real mode
             self.saved = _SAVED_CFG.read_bytes() if _SAVED_CFG.exists() else _FALLBACK_CFG
         cfg = bytearray(self.saved)
         cfg[1], cfg[2] = MODE_STREAM, brightness
@@ -77,6 +79,22 @@ class Keyboard:
         cfg = bytearray(self.saved or self.read_config())
         cfg[1] = MODE_OFF
         self.write_config(bytes(cfg))
+
+    def write_custom(self, frame):
+        """Per-key colours of the firmware "custom" mode (0x13); stored in the keyboard."""
+        for off in range(0, FRAME, CHUNK):
+            self.tx(0x0B, min(CHUNK, FRAME - off), off, frame[off:off + CHUNK])
+
+    def exit_to(self, cfg, custom_frame=None):
+        """Leave the keyboard in a chosen firmware mode instead of the saved one."""
+        try:
+            if custom_frame is not None:
+                self.write_custom(custom_frame)
+            self.write_config(cfg)
+            _EXIT_CFG.parent.mkdir(parents=True, exist_ok=True)
+            _EXIT_CFG.write_bytes(cfg)
+        finally:
+            self.h.close()
 
     def send(self, frame):
         for off in range(0, FRAME, CHUNK):

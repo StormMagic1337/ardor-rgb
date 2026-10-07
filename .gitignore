@@ -6,3 +6,4 @@ build/
 dist/
 *.spec
 probe_result.json
+tools/sniff_steps.log

@@ -12,6 +12,10 @@ class Overlay:
     def __init__(self, enabled=True):
         self.enabled = enabled
 
+    def busy(self):
+        """True while the overlay must be drawn even if disabled (e.g. a manually triggered popup)."""
+        return False
+
     def apply(self, out, t, dt):
         raise NotImplementedError
 
@@ -86,4 +90,57 @@ class VolumeOverlay(Overlay):
         return out
 
 
-ALL = [CpuOverlay, VolumeOverlay]
+class NotifyOverlay(Overlay):
+    """A wave in the app's colour from the centre; in fullscreen games only Esc blinks until any key is pressed."""
+    title = "Уведомления (Telegram, Discord…)"
+    ESC = layout.slot_of("Esc")
+    WAVE = 1.4
+
+    def __init__(self, enabled=True):
+        super().__init__(enabled)
+        self.events = []                 # (t0, hue) waves in flight
+        self.esc_hue = None              # pending Esc blink (game mode)
+        self.esc_since = 0.0
+        self.in_game = lambda: False     # set by the app
+        self._incoming = []
+        self._lock = threading.Lock()
+
+    def notify(self, app):               # any thread
+        with self._lock:
+            self._incoming.append(app["hue"])
+
+    MIN_BLINK = 4.0                      # in games keys are pressed all the time: blink at least this long
+
+    def pressed(self):                   # engine: some key went down
+        if self.esc_hue is not None and time.perf_counter() - self.esc_since > self.MIN_BLINK:
+            self.esc_hue = None
+
+    def busy(self):
+        return False
+
+    def apply(self, out, t, dt):
+        with self._lock:
+            incoming, self._incoming = self._incoming, []
+        for hue in incoming:
+            if self.in_game():
+                self.esc_hue, self.esc_since = hue, time.perf_counter()
+            else:
+                self.events.append((t, hue))
+        self.events = [e for e in self.events if t - e[0] < self.WAVE * 2]
+        if not self.events and self.esc_hue is None:
+            return out
+        out = out.copy()
+        d = np.hypot(layout.X - layout.W / 2, (layout.Y - 2.6) * 1.6)
+        for t0, hue in self.events:
+            for k in range(2):                                   # two rings, 0.5 s apart
+                age = t - t0 - k * 0.5
+                if 0 <= age < self.WAVE:
+                    ring = np.clip(1 - np.abs(d - age * 11) / 1.8, 0, 1) * (1 - age / self.WAVE)
+                    out = out * (1 - ring)[:, None] + hsv(np.full(layout.N, hue), 0.9, ring)
+        if self.esc_hue is not None:
+            v = 0.5 + 0.5 * np.sin(t * 6)
+            out[self.ESC] = hsv(np.array([self.esc_hue]), 1, v)[0]
+        return np.clip(out, 0, 1)
+
+
+ALL = [CpuOverlay, VolumeOverlay, NotifyOverlay]

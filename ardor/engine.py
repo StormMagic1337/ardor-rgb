@@ -3,11 +3,22 @@ streams frames to the keyboard and reconnects if the cable is pulled."""
 import ctypes, threading, time
 import numpy as np
 from . import layout
-from .device import Keyboard, DeviceNotFound, FRAME
+from .device import (Keyboard, DeviceNotFound, FRAME, MODE_OFF, MODE_WAVE, MODE_BREATHE, MODE_STATIC,
+                     MODE_CUSTOM)
+from .effects.base import hsv
 from .effects import BY_NAME
 
 FADE = 0.5
+EXIT_MODES = {"restore": "Как было до запуска", "off": "Выключено", "static": "Статичный цвет",
+              "breathe": "Дыхание", "wave": "Радужная волна (прошивка)", "snapshot": "Снимок текущего эффекта"}
 _gaks = ctypes.windll.user32.GetAsyncKeyState
+
+
+def cut_dark(out, level):
+    """Keys darker than `level` go fully off; a soft knee up to 2.5x level avoids hard edges."""
+    lum = out.max(1)
+    k = np.clip((lum - level) / (level * 1.5), 0, 1)
+    return out * (k * k * (3 - 2 * k))[:, None]
 
 
 class Engine:
@@ -32,6 +43,10 @@ class Engine:
         self._kb = None
         self._hw_saved = None           # keyboard's own lighting config, restored on exit
         self._paused = False
+        self.exit_mode = "restore"      # what the keyboard shows after we stop, see EXIT_MODES
+        self.true_black = False         # switch LEDs fully off where the effect is meant to be dark
+        self.black_level = 0.08
+        self.exit_hue = 0.6
 
     # --- control (thread-safe) ------------------------------------------------
     @property
@@ -101,6 +116,10 @@ class Engine:
     def _render(self, t, dt):
         calm = self.calm or self.auto_calm
         presses = self._presses()
+        if presses:
+            for ov in self.overlays:
+                if hasattr(ov, "pressed"):
+                    ov.pressed()
         if calm:
             presses = []
         with self._lock:
@@ -113,8 +132,10 @@ class Engine:
                 else:
                     old = self._get(self._fading_from).render(t, dt, [], calm)
                     out = old * (1 - a) + out * a
+        if self.true_black:
+            out = cut_dark(out, self.black_level)
         for ov in self.overlays:
-            if ov.enabled:
+            if ov.enabled or ov.busy():
                 out = ov.apply(out, t, dt)
         if not self.enabled:
             out = np.zeros_like(out)
@@ -144,12 +165,8 @@ class Engine:
             out = self._render(t, dt)
             self.frame = out
             if self._kb is not None:
-                buf = np.zeros((FRAME // 3, 3), np.uint8)
-                buf[layout.LEDS] = (out * 255 + 0.5).astype(np.uint8)
-                for dst, src in layout.MIRROR.items():
-                    buf[dst] = buf[src]
                 try:
-                    self._kb.send(buf.tobytes())
+                    self._kb.send(self._to_bytes(out))
                 except OSError:
                     self.status = "клавиатура отключена"
                     try:
@@ -160,7 +177,35 @@ class Engine:
             self._stop.wait(max(0.0, 1 / self.fps - (time.perf_counter() - start)))
         if self._kb is not None:
             try:
-                self._kb.close()
+                self._leave_keyboard()
             except OSError:
                 pass
             self.status = "остановлено"
+
+    def _to_bytes(self, out):
+        buf = np.zeros((FRAME // 3, 3), np.uint8)
+        buf[layout.LEDS] = (out * 255 + 0.5).astype(np.uint8)
+        for dst, src in layout.MIRROR.items():
+            buf[dst] = buf[src]
+        return buf.tobytes()
+
+    def _leave_keyboard(self):
+        kb, mode = self._kb, self.exit_mode
+        if mode == "restore" or not kb.saved:
+            kb.close()
+            return
+        cfg = bytearray(kb.saved)
+        cfg[2] = 4
+        rgb = bytes((hsv(np.array([self.exit_hue]), 1, 1)[0] * 255).astype(np.uint8))
+        frame = None
+        if mode == "off":
+            cfg[1] = MODE_OFF
+        elif mode in ("static", "breathe"):
+            cfg[1] = MODE_STATIC if mode == "static" else MODE_BREATHE
+            cfg[5], cfg[6:9] = 0, rgb
+        elif mode == "wave":
+            cfg[1], cfg[5] = MODE_WAVE, 1
+        elif mode == "snapshot":
+            cfg[1] = MODE_CUSTOM
+            frame = self._to_bytes(self.frame)
+        kb.exit_to(bytes(cfg), frame)

@@ -1,6 +1,8 @@
 """Renders the README media without a keyboard: animated GIFs of effects and a screenshot of the window.
 The GIFs are drawn by the same KeyboardPreview widget the app shows, so they are previews, not photos.
-  python tools/render_previews.py            all GIFs + window screenshot into docs/media
+  python tools/render_previews.py            README GIFs + window screenshot into docs/media
+  python tools/render_previews.py --all      animated WebP of every effect into docs/media/effects
+                                             (WebP is 3-5x smaller than GIF for full-board motion)
   python tools/render_previews.py storm fire only these effects (no screenshot)
 Needs Pillow in addition to requirements.txt. hidapi / pycaw / PyAudioWPatch are not needed."""
 import io, json, sys, threading, types
@@ -28,6 +30,9 @@ from ardor.overlays import ALL as OVERLAYS
 OUT = ROOT / "docs" / "media"
 FPS, SECONDS, WARMUP = 20, 4.0, 2.0
 GIFS = ["storm", "fire", "rain", "music_eq", "matrix", "aurora"]
+# Effects whose look depends on the outside world get fixed parameters for the preview.
+PREVIEW_PARAMS = {"weather": {"force": 1}}          # weather: a clear day instead of live data
+SKIP = {"off"}
 TYPING = "W A S D Space J K L Enter Q E R".split()     # fake key presses for reactive effects
 
 
@@ -65,25 +70,26 @@ def to_pil(widget):
     return Image.open(io.BytesIO(bytes(buf.data()))).convert("RGB")
 
 
-def render_gif(name):
+def render_gif(name, out_dir=OUT, fps=FPS, seconds=SECONDS, webp=False):
     audio.Audio._inst = FakeAudio()
-    eff = BY_NAME[name]()
+    eff = BY_NAME[name](**PREVIEW_PARAMS.get(name, {}))
     engine = types.SimpleNamespace(frame=np.zeros((app.layout.N, 3)))
     view = app.KeyboardPreview(engine)
     view.resize(640, 204)
     rng = np.random.default_rng(7)
-    dt, frames, t = 1 / FPS, [], 0.0
-    for i in range(int((WARMUP + SECONDS) * FPS)):
+    dt, frames, t = 1 / fps, [], 0.0
+    for i in range(int((WARMUP + seconds) * fps)):
         presses = []
         if rng.random() < dt * 1.2:                    # occasional key press, like light typing
             presses = [app.layout.slot_of(rng.choice(TYPING))]
         engine.frame = eff.render(t, dt, presses, False)
         t += dt
         if t > WARMUP:
-            frames.append(to_pil(view).quantize(colors=64, method=Image.Quantize.MEDIANCUT))
-    path = OUT / f"{name}.gif"
-    frames[0].save(path, save_all=True, append_images=frames[1:], duration=int(1000 / FPS), loop=0,
-                   optimize=True)
+            img = to_pil(view)
+            frames.append(img if webp else img.quantize(colors=64, method=Image.Quantize.MEDIANCUT))
+    path = out_dir / f"{name}.{'webp' if webp else 'gif'}"
+    extra = dict(quality=55, method=6) if webp else dict(optimize=True)
+    frames[0].save(path, save_all=True, append_images=frames[1:], duration=int(1000 / fps), loop=0, **extra)
     print(f"{path.relative_to(ROOT)}  {path.stat().st_size // 1024} KB")
 
 
@@ -109,6 +115,13 @@ def main(argv):
     qt = QApplication(sys.argv)
     qt.setStyleSheet(app.STYLE)
     OUT.mkdir(parents=True, exist_ok=True)
+    if argv == ["--all"]:
+        out = OUT / "effects"
+        out.mkdir(exist_ok=True)
+        for name in BY_NAME:
+            if name not in SKIP:
+                render_gif(name, out, fps=15, seconds=3.0, webp=True)
+        return
     for name in argv or GIFS:
         render_gif(name)
     if not argv:

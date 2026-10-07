@@ -12,6 +12,13 @@ from ardor.effects import ALL, BY_NAME
 from ardor.overlays import CpuOverlay, VolumeOverlay
 
 
+def _num(v):
+    try:
+        return float(v)
+    except ValueError:
+        return v                       # text parameters, e.g. text="ПРИВЕТ"
+
+
 def main(argv):
     if not argv or "--list" in argv:
         for cls in ALL:
@@ -21,7 +28,7 @@ def main(argv):
     name = argv[0]
     if name not in BY_NAME:
         sys.exit(f"unknown effect {name}; see --list")
-    params = {k: float(v) for k, v in (a.split("=", 1) for a in argv[1:] if "=" in a)}
+    params = {k: _num(v) for k, v in (a.split("=", 1) for a in argv[1:] if "=" in a)}
     eng = Engine(name, params={name: params})
     eng.calm = "--calm" in argv
     if "--cpu" in argv:

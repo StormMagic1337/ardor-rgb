@@ -9,8 +9,13 @@ DEFAULTS = {
     "calm": False,
     "game_calm": True,          # auto calm while a fullscreen app/game is in front
     "lock_breathe": True,       # slow breathing while the PC is locked
-    "overlays": {"CpuOverlay": False, "VolumeOverlay": True},
+    "overlays": {"CpuOverlay": False, "VolumeOverlay": True, "NotifyOverlay": True},
+    "notify_apps": None,        # None -> notifications.DEFAULT_APPS
     "params": {},               # {effect: {param: value}}
+    "exit_mode": "restore",     # firmware mode left on the keyboard when the app stops (engine.EXIT_MODES)
+    "exit_hue": 0.6,
+    "true_black": False,        # cut near-black areas to fully off
+    "black_level": 0.08,
 }
 
 

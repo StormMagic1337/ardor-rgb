@@ -12,7 +12,8 @@ class Param:
     lo: float
     hi: float
     default: float
-    kind: str = "float"          # "float" | "int" | "hue" | "bool"
+    kind: str = "float"          # "float" | "int" | "hue" | "bool" | "choice" | "text"
+    options: tuple = ()          # labels for "choice" (value = index)
 
 
 class Effect:
@@ -25,6 +26,10 @@ class Effect:
         self.p.update({k: v for k, v in values.items() if k in self.p})
         self.rng = np.random.default_rng()
         self.reset()
+
+    def info(self):
+        """Optional status line shown under the preview (e.g. current weather)."""
+        return None
 
     def set(self, name, value):
         self.p[name] = value

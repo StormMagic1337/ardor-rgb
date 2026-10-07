@@ -2,7 +2,7 @@
 
 [Русская версия](PROTOCOL.md) · [← README](../README.en.md)
 
-How ARDOR RGB drives the keyboard's lighting. The protocol was reverse-engineered from USB traffic between the keyboard and the vendor app (Guardian). Everything here was verified on one model only: **ARDOR GAMING Guardian 95%, wired**. Implementation: [`ardor/device.py`](../ardor/device.py); a minimal self-contained 200-line example: [`tools/legacy_ardor.py`](../tools/legacy_ardor.py).
+How ARDOR RGB drives the keyboard's lighting. The protocol was reverse-engineered from USB traffic between the keyboard and the vendor app (Guardian). Everything here was verified on one model only: **ARDOR GAMING Guardian 98%, wired** (the radio link was checked separately, see [below](#wireless-24-ghz)). Implementation: [`ardor/device.py`](../ardor/device.py); a minimal self-contained 200-line example: [`tools/legacy_ardor.py`](../tools/legacy_ardor.py).
 
 > Unofficial information, not affiliated with ARDOR GAMING / DNS. Use at your own risk — see the [disclaimer](../README.en.md#disclaimer).
 
@@ -62,10 +62,11 @@ Read responses carry their data at the same offset 8.
 | `0x05` | read the lighting config (`size=0x22`, `off=0`) | ✅ |
 | `0x06` | write the lighting config (`size=0x22`, `off=0`) | ✅ |
 | `0x07` | read the key matrix: 3 bytes per LED — `0x20`, modifier, HID usage | ❌ (used while building the LED map) |
-| `0x0B` | write per-key colours of the "custom" mode (stored on the keyboard) | ❌ |
+| `0x0B` | write per-key colours of the "custom" mode (stored on the keyboard); same layout as a `0x12` frame | ✅ only on exit with "Effect snapshot" |
 | `0x12` | send part of a frame in streaming mode (RAM only) | ✅ |
+| `0x1A` | status request, `size=6`; the vendor app sends it every 5 s. Over the radio, byte 8 of the answer is the battery level in percent (`0x64` = 100) | ❌ |
 
-`0x07` and `0x0B` were observed in the vendor app's traffic and are listed for completeness; ARDOR RGB does not call them.
+`0x07` and `0x1A` were observed in the vendor app's traffic and are listed for completeness; ARDOR RGB does not call them.
 
 ## Lighting config (34 bytes)
 
@@ -75,17 +76,24 @@ Read with `0x05`, written with the transaction `0x01` → `0x06` → `0x02`.
 |---|---|
 | 1 | **mode** |
 | 2 | **hardware brightness** 0…4 |
-| others | mode parameters (speed, colour, …) — not decoded |
+| 5 | "multicolour" flag (1 = rainbow / random colours, 0 = colour from bytes 6–8) |
+| 6–8 | **mode colour** R, G, B |
+| others | speed, direction etc. — not decoded yet (see `tools/sniff_steps.py`) |
 
-Known mode values:
+Mode numbers match the values in the vendor app's mode list (`DefaultData/default_light.json`): 1 wave, 2 cloud, 3 vortex, 4 spectrum, 5 breathing, 6 static, 7 reactive, 8 ripple, 9 arrow, 10 starlight, 11 mosaic, 12 rainbow waterfall, 13 wave bar, 14 geometric, 15 raindrops, 16 side to side, 17 dimmed multicolour, 18 rainbow rings, 19 custom, 20 off.
 
-| Mode | Value |
-|---|---|
-| `0xFE` | **streaming** — the keyboard shows frames sent with `0x12` |
-| `0x14` | **off** ("off" in the vendor app's mode list) |
-| `0x13` | "custom" — seen in a captured static-blue config |
+Values verified on the keyboard:
 
-ARDOR RGB never builds a config from scratch: it reads the current one, changes bytes 1–2 and writes it back. Other bytes are copied as-is, so their meaning does not matter.
+| Mode | Value | Example config (bytes 0–9) |
+|---|---|---|
+| `0xFE` | **streaming** — the keyboard shows frames sent with `0x12` | — |
+| `0x14` | **off** | — |
+| `0x13` | custom — per-key colours written with `0x0B` | `00 13 04 00 00 00 31 53 ff 08` |
+| `0x06` | static colour | `00 06 04 00 00 00 ff 00 00 08` — red |
+| `0x05` | breathing | — |
+| `0x01` | wave | — |
+
+ARDOR RGB never builds a config from scratch: it reads the current one, changes the bytes it needs and writes it back. Other bytes are copied as-is.
 
 Example (static blue in "custom" mode, captured from the vendor app; used as a last-resort restore value):
 
@@ -123,6 +131,12 @@ Hardware brightness is pinned to the maximum (4) in streaming mode; smooth brigh
 - If the keyboard is already in mode `0xFE` or `0x14` at start (left there by the app itself, e.g. after a crash), the config from `hw_config.bin` is used as the original; if there is no file, the static-blue fallback above.
 - Before the PC sleeps the keyboard is switched to `0x14` (off) so it stays dark without a stream, and back to `0xFE` after resume. The original config is kept in memory meanwhile.
 
+### "When the app is closed" mode
+
+Instead of restoring the original mode on exit, the keyboard can be left in a chosen hardware mode: off (`0x14`), static colour (`0x06`), breathing (`0x05`), rainbow wave (`0x01` with the multicolour flag) or an **effect snapshot**: the last frame is written with `0x0B` into the per-key colours and mode `0x13` is switched on. This is the only time the app writes colours into the keyboard's persistent memory, and it happens once, on exit.
+
+The config written this way is saved to `%APPDATA%\ardor-rgb\exit_config.bin`. On the next start, if the keyboard is in exactly that config, it is not taken as the user's original mode; the one in `hw_config.bin` stays the original.
+
 ## LED map
 
 LED index = position in the key matrix (same order as the `0x07` response). `_` = slot without a key. Indices 105…127 are unused.
@@ -151,10 +165,25 @@ On this layout three keys carry two functions: **Del/PrtSc**, **Ins/Pause**, **P
 
 [`tools/probe.py`](../tools/probe.py) lights LEDs one at a time (white on a dim blue background) and asks which key lit up. Ambiguous indices (13, 14, 29, 44, 57, 59, 78, 79, 81–84 and 105–127) were checked this way. Key coordinates for effects (`ardor/layout.py`) were measured from a photo of the keyboard, in key-width units.
 
+## Wireless (2.4 GHz)
+
+Over the radio the keyboard is reached through the dongle **`320F:5088`** ("Wireless Gaming Keyboard") with the same vendor interface `0xFF1C`. All the commands above work through it, streaming mode included. Measurements:
+
+| | Cable | Radio |
+|---|---|---|
+| Packet round trip | ~1 ms | ~6–10 ms |
+| Full frame (7 packets) | ~15 ms → up to 60 fps | ~70 ms → ~14 fps |
+| Updating 2 of 7 chunks | — | ~30 times per second |
+| Losses | none | none when packets are sent strictly one by one |
+
+- **One packet at a time.** Sending all 7 packets of a frame back to back and reading the answers afterwards loses most of them (3 of 21 arrived in the test).
+- While the keyboard is connected by cable, the dongle answers commands with an error (`ff` in byte 3).
+- ARDOR RGB **does not support the radio link yet**; it is planned (sending only the changed chunks of a frame, a battery indicator).
+
 ## Pitfalls
 
 - **Close the vendor app.** It talks to the same interface; the two apps will fight.
-- **Wired only.** Everything was verified over USB cable; wireless mode was not investigated.
+- **The app works over the cable.** The protocol works over the radio too (see above), but the app only looks for the wired `320F:5055` so far.
 - **Every packet waits for its echo.** Skipping the read desynchronises the exchange; reads use a 1 s timeout.
 - **A failed write means the keyboard is gone.** `hid.write` returns −1 when the cable is pulled; the app closes the device and retries every 2 s.
 

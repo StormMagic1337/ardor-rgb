@@ -6,14 +6,15 @@ import sys, time
 from PySide6.QtCore import Qt, QTimer, QObject, Signal, QRectF, QAbstractNativeEventFilter
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QPainter, QPixmap, QLinearGradient, QFont
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
-from PySide6.QtWidgets import (QApplication, QCheckBox, QFormLayout, QGroupBox, QHBoxLayout, QLabel,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFormLayout, QLineEdit, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
                                QListWidget, QListWidgetItem, QMainWindow, QMenu, QPushButton, QSlider,
                                QSystemTrayIcon, QVBoxLayout, QWidget)
 
 from ardor import layout, settings, winsys
-from ardor.engine import Engine
+from ardor.engine import Engine, EXIT_MODES
 from ardor.effects import ALL as EFFECTS, BY_NAME
-from ardor.overlays import ALL as OVERLAYS
+from ardor.overlays import ALL as OVERLAYS, NotifyOverlay
+from ardor.notifications import NotificationWatcher, DEFAULT_APPS
 
 APP_ID = "ardor-rgb-single-instance"
 HOTKEY_HELP = ("Ctrl+Alt+← / → — эффект    Ctrl+Alt+↑ / ↓ — яркость    "
@@ -33,12 +34,20 @@ QSlider::sub-page:horizontal { background: #c8102e; border-radius: 2px; }
 QSlider::handle:horizontal { background: #f2f2f5; width: 14px; margin: -6px 0; border-radius: 7px; }
 QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; border: 1px solid #555a66; background: #1d1f25; }
 QCheckBox::indicator:checked { background: #c8102e; border-color: #c8102e; }
+QLineEdit { background: #1d1f25; border: 1px solid #343843; border-radius: 6px; padding: 4px 8px; }
+QComboBox { background: #1d1f25; border: 1px solid #343843; border-radius: 6px; padding: 4px 8px; }
+QComboBox QAbstractItemView { background: #1d1f25; selection-background-color: #c8102e; }
 QPushButton { background: #262932; border: 1px solid #343843; border-radius: 6px; padding: 5px 12px; }
 QPushButton:hover { background: #2f333d; }
 QLabel#status { color: #9aa0ad; }
 QMenu { background: #1d1f25; border: 1px solid #2a2d35; }
 QMenu::item:selected { background: #c8102e; }
 """
+
+_STOPS = ", ".join(f"stop:{i / 6:.3f} hsv({int(i * 60) % 360}, 255, 230)" for i in range(7))
+HUE_GROOVE = ("QSlider::groove:horizontal { height: 8px; border-radius: 4px; "
+              f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, {_STOPS}); }}"
+              "QSlider::sub-page:horizontal { background: transparent; }")
 
 # key sizes in key units (default 1x1)
 WIDE = {"Bksp": 2.0, "Tab": 1.5, "BSL": 1.5, "Caps": 1.75, "Enter": 2.25, "LShift": 2.25, "RShift": 1.75,
@@ -125,16 +134,22 @@ class ParamPanel(QGroupBox):
                 w = QCheckBox()
                 w.setChecked(bool(value))
                 w.toggled.connect(lambda v, n=pr.name: self._set(name, n, int(v)))
+            elif pr.kind == "text":
+                w = QLineEdit(str(value))
+                w.setMaxLength(200)
+                w.textChanged.connect(lambda v, n=pr.name: self._set(name, n, v))
+            elif pr.kind == "choice":
+                w = QComboBox()
+                w.addItems(pr.options)
+                w.setCurrentIndex(int(value))
+                w.currentIndexChanged.connect(lambda v, n=pr.name: self._set(name, n, v))
             else:
                 w = QSlider(Qt.Horizontal)
                 steps = int(pr.hi - pr.lo) if pr.kind == "int" else 200
                 w.setRange(0, steps)
                 w.setValue(round((value - pr.lo) / (pr.hi - pr.lo) * steps))
                 if pr.kind == "hue":
-                    stops = ", ".join(f"stop:{i / 6:.3f} hsv({int(i * 60) % 360}, 255, 230)" for i in range(7))
-                    w.setStyleSheet("QSlider::groove:horizontal { height: 8px; border-radius: 4px; "
-                                    f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, {stops}); }}"
-                                    "QSlider::sub-page:horizontal { background: transparent; }")
+                    w.setStyleSheet(HUE_GROOVE)
                 w.valueChanged.connect(lambda v, n=pr.name, lo=pr.lo, hi=pr.hi, s=steps:
                                        self._set(name, n, lo + (hi - lo) * v / s))
             self.form.addRow(pr.title, w)
@@ -174,6 +189,71 @@ class PowerFilter(QAbstractNativeEventFilter):
             if msg.message == self.WM_POWERBROADCAST:
                 self.bridge.power.emit(int(msg.wParam))
         return False, 0
+
+
+class NotifyDialog(QDialog):
+    """Apps whose notifications light up the keyboard: name, match pattern (regex on the app id), colour."""
+
+    def __init__(self, parent, apps, overlay, watcher, on_change):
+        super().__init__(parent)
+        self.setWindowTitle("Уведомления")
+        self.apps, self.overlay, self.watcher, self.on_change = apps, overlay, watcher, on_change
+        self.setMinimumWidth(620)
+        lay = QVBoxLayout(self)
+        hint = QLabel("Шаблон ищется в системном имени приложения (регулярное выражение, без учёта регистра).",
+                      objectName="status")
+        hint.setWordWrap(True)
+        lay.addWidget(hint)
+        self.grid = QGridLayout()
+        lay.addLayout(self.grid)
+        self.last = QLabel(objectName="status")
+        self.last.setWordWrap(True)
+        lay.addWidget(self.last)
+        add = QPushButton("Добавить приложение")
+        add.clicked.connect(self._add)
+        lay.addWidget(add)
+        self._rebuild()
+        QTimer(self, interval=1000, timeout=self._show_last).start()
+
+    def _show_last(self):
+        app_id = self.watcher.last_app_id
+        self.last.setText(f"Последнее уведомление пришло от: {app_id}" if app_id else
+                          "Пока не было новых уведомлений с момента запуска.")
+
+    def _rebuild(self):
+        while self.grid.count():
+            self.grid.takeAt(0).widget().deleteLater()
+        for c, h in enumerate(("Название", "Шаблон", "Цвет", "", "")):
+            self.grid.addWidget(QLabel(h, objectName="status"), 0, c)
+        for r, app in enumerate(self.apps, 1):
+            name, match = QLineEdit(app["name"]), QLineEdit(app["match"])
+            name.textChanged.connect(lambda v, a=app: self._set(a, "name", v))
+            match.textChanged.connect(lambda v, a=app: self._set(a, "match", v))
+            hue = QSlider(Qt.Horizontal)
+            hue.setRange(0, 200)
+            hue.setValue(int(app["hue"] * 200))
+            hue.setStyleSheet(HUE_GROOVE)
+            hue.valueChanged.connect(lambda v, a=app: self._set(a, "hue", v / 200))
+            test = QPushButton("Проверить")
+            test.clicked.connect(lambda _=False, a=app: self.overlay.notify(a))
+            rm = QPushButton("✕")
+            rm.clicked.connect(lambda _=False, a=app: self._remove(a))
+            for c, w in enumerate((name, match, hue, test, rm)):
+                self.grid.addWidget(w, r, c)
+
+    def _set(self, app, key, value):
+        app[key] = value
+        self.on_change()
+
+    def _add(self):
+        self.apps.append({"name": "Новое", "match": "", "hue": 0.0})
+        self.on_change()
+        self._rebuild()
+
+    def _remove(self, app):
+        self.apps.remove(app)
+        self.on_change()
+        self._rebuild()
 
 
 class MainWindow(QMainWindow):
@@ -217,6 +297,12 @@ class MainWindow(QMainWindow):
         g.addRow("Яркость", self.bright)
         self.chk_on = self._check(g, "Подсветка включена", engine.enabled, self._toggle_on)
         self.chk_calm = self._check(g, "Спокойный режим (без реакции на нажатия)", engine.calm, self._calm)
+        self._check(g, "Настоящая темнота (гасить почти чёрные места)", engine.true_black, self._true_black)
+        self.black = QSlider(Qt.Horizontal)
+        self.black.setRange(1, 25)
+        self.black.setValue(int(engine.black_level * 100))
+        self.black.valueChanged.connect(self._black_level)
+        g.addRow("Порог темноты", self.black)
         self._check(g, "В полноэкранных играх — спокойный режим", cfg["game_calm"],
                     lambda v: self._cfg("game_calm", v))
         self._check(g, "При блокировке ПК — медленное дыхание", cfg["lock_breathe"],
@@ -224,6 +310,20 @@ class MainWindow(QMainWindow):
         for ov in engine.overlays:
             self._check(g, ov.title, ov.enabled, lambda v, o=ov: self._overlay(o, v))
         self._check(g, "Запускать вместе с Windows (в трее)", winsys.autostart_enabled(), winsys.set_autostart)
+        notif = QPushButton("Уведомления: приложения и цвета…")
+        notif.clicked.connect(self._notify_dialog)
+        g.addRow(notif)
+        self.exit_combo = QComboBox()
+        self.exit_combo.addItems(EXIT_MODES.values())
+        self.exit_combo.setCurrentIndex(list(EXIT_MODES).index(engine.exit_mode))
+        self.exit_combo.currentIndexChanged.connect(self._exit_mode)
+        g.addRow("Когда программа закрыта", self.exit_combo)
+        self.exit_hue = QSlider(Qt.Horizontal)
+        self.exit_hue.setRange(0, 200)
+        self.exit_hue.setValue(int(engine.exit_hue * 200))
+        self.exit_hue.setStyleSheet(HUE_GROOVE)
+        self.exit_hue.valueChanged.connect(self._exit_hue)
+        g.addRow("Цвет для этого режима", self.exit_hue)
         row.addWidget(glob, 2)
 
         self.status = QLabel(objectName="status")
@@ -266,12 +366,32 @@ class MainWindow(QMainWindow):
     def _toggle_on(self, v):
         self.engine.enabled = v
 
+    def _true_black(self, v):
+        self.engine.true_black = v
+        self._save_later()
+
+    def _black_level(self, v):
+        self.engine.black_level = v / 100
+        self._save_later()
+
     def _calm(self, v):
         self.engine.calm = v
         self._save_later()
 
     def _overlay(self, ov, v):
         ov.enabled = v
+        self._save_later()
+
+    def _notify_dialog(self):
+        ov = next(o for o in self.engine.overlays if isinstance(o, NotifyOverlay))
+        NotifyDialog(self, self.cfg["notify_apps"], ov, self.watcher, self._save_later).exec()
+
+    def _exit_mode(self, i):
+        self.engine.exit_mode = list(EXIT_MODES)[i]
+        self._save_later()
+
+    def _exit_hue(self, v):
+        self.engine.exit_hue = v / 200
         self._save_later()
 
     def _cfg(self, key, v):
@@ -284,6 +404,8 @@ class MainWindow(QMainWindow):
     def _save(self):
         e = self.engine
         self.cfg.update(effect=e.effect, brightness=e.brightness, calm=e.calm, params=e.params,
+                        exit_mode=e.exit_mode, exit_hue=e.exit_hue, true_black=e.true_black,
+                        black_level=e.black_level,
                         overlays={type(o).__name__: o.enabled for o in e.overlays})
         settings.save(self.cfg)
 
@@ -294,7 +416,8 @@ class MainWindow(QMainWindow):
         e.override = "breathe" if locked and self.cfg["lock_breathe"] else None
         e.auto_calm = self.cfg["game_calm"] and not locked and winsys.fullscreen_app()
         mode = " · игра: спокойный режим" if e.auto_calm else (" · ПК заблокирован" if locked else "")
-        self.status.setText(f"Клавиатура: {e.status}{mode}")
+        info = e.effect_obj(e.effect).info()
+        self.status.setText(f"Клавиатура: {e.status}{mode}" + (f"   ·   {info}" if info else ""))
 
     def on_hotkey(self, action):
         e = self.engine
@@ -307,6 +430,7 @@ class MainWindow(QMainWindow):
             self.chk_on.setChecked(not e.enabled)
         elif action == "toggle_calm":
             self.chk_calm.setChecked(not e.calm)
+
 
     def on_power(self, event):
         if event == 0x4:                     # PBT_APMSUSPEND
@@ -375,13 +499,22 @@ def main():
     cfg = settings.load()
     engine = Engine(cfg["effect"] if cfg["effect"] in BY_NAME else "storm", params=cfg["params"])
     engine.brightness, engine.calm = cfg["brightness"], cfg["calm"]
+    engine.exit_mode = cfg["exit_mode"] if cfg["exit_mode"] in EXIT_MODES else "restore"
+    engine.exit_hue = cfg["exit_hue"]
+    engine.true_black, engine.black_level = cfg["true_black"], cfg["black_level"]
     engine.overlays = [cls(enabled=cfg["overlays"].get(cls.__name__, False)) for cls in OVERLAYS]
     engine.start()
 
     bridge = Bridge()
     power_filter = PowerFilter(bridge)
     app.installNativeEventFilter(power_filter)
+    if not cfg.get("notify_apps"):
+        cfg["notify_apps"] = [dict(a) for a in DEFAULT_APPS]
+    notify_ov = next(o for o in engine.overlays if isinstance(o, NotifyOverlay))
+    notify_ov.in_game = lambda: engine.auto_calm
+    watcher = NotificationWatcher(cfg["notify_apps"], lambda app: notify_ov.enabled and notify_ov.notify(app))
     win = MainWindow(engine, cfg, bridge)
+    win.watcher = watcher
     tray = build_tray(app, win, engine)
     server.newConnection.connect(lambda: (server.nextPendingConnection(), win.showNormal(), win.activateWindow()))
 

@@ -100,11 +100,14 @@ class FireClassic(Effect):
 class Breathe(Effect):
     """Slow breathing, also used while the PC is locked."""
     name, title = "breathe", "Дыхание"
-    params = [Param("hue", "Цвет", 0.0, 1.0, 0.62, "hue"), Param("period", "Период, с", 2.0, 12.0, 6.0)]
+    params = [Param("hue", "Цвет", 0.0, 1.0, 0.62, "hue"), Param("period", "Период, с", 2.0, 12.0, 6.0),
+              Param("rainbow", "Новый цвет на каждом вдохе", 0, 1, 0, "bool")]
 
     def render(self, t, dt, presses, calm):
-        v = 0.08 + 0.5 * (0.5 - 0.5 * np.cos(2 * np.pi * t / self.p["period"])) ** 2
-        return hsv(np.full(N, self.p["hue"]), 0.9, v)
+        per = self.p["period"]
+        v = 0.08 + 0.5 * (0.5 - 0.5 * np.cos(2 * np.pi * t / per)) ** 2
+        hue = self.p["hue"] + (np.floor(t / per) * 0.17 if self.p["rainbow"] else 0)
+        return hsv(np.full(N, hue), 0.9, v)
 
 
 class Off(Effect):

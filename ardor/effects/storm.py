@@ -16,13 +16,17 @@ class Storm(Effect):
         Param("wind", "Ветер", 0.0, 3.0, 1.0),
         Param("clouds", "Яркость облаков", 0.0, 2.0, 1.0),
         Param("rain", "Дождь", 0.0, 1.0, 0.3),
+        Param("music", "Молнии в такт музыке (бас)", 0, 1, 0, "bool"),
+        Param("cycles", "Шторм нарастает и стихает", 0, 1, 0, "bool"),
+        Param("cycle_min", "Длина цикла, мин", 1.0, 10.0, 4.0),
     ]
 
     def reset(self):
         self.noise = Noise(self.rng)
         self.strikes = []
-        self.next_strike = 1.5
         self.drops = []
+        self.audio = None
+        self.last_beat_strike = -10.0
 
     # --- lightning geometry -------------------------------------------------
     def _path(self, x_start, y_end, x_end=None):
@@ -71,17 +75,33 @@ class Storm(Effect):
         self.strikes.append(dict(kind=kind, t0=t, core=core, glow=glow, pulses=pulses, amps=amps))
 
     # --- frame ----------------------------------------------------------------
+    def intensity(self, t):
+        """Storm strength 0.1..1: constant 1 unless cycles are on."""
+        if not self.p["cycles"]:
+            return 1.0
+        period = self.p["cycle_min"] * 60
+        wave = 0.5 - 0.5 * np.cos(2 * np.pi * t / period)
+        return 0.1 + 0.9 * wave ** 1.5 * (0.85 + 0.3 * self.noise(t * 0.05, 7.7))
+
     def render(self, t, dt, presses, calm):
         p = self.p
+        k = self.intensity(t)
         for slot in presses:
             self._strike(t, target=slot)
-        if p["frequency"] > 0 and t >= self.next_strike:
+        if p["music"]:
+            if self.audio is None:
+                from ..audio import Audio
+                self.audio = Audio.get()
+            self.audio.update(dt)
+            if self.audio.beat and t - self.last_beat_strike > 0.35 and self.rng.random() < 0.35 + 0.65 * k:
+                self._strike(t)
+                self.last_beat_strike = t
+        elif t > 1.5 and self.rng.random() < dt * p["frequency"] * k / 6.0:     # ~every 6 s at full strength
             self._strike(t)
-            self.next_strike = t + self.rng.exponential(6.0 / p["frequency"]) + 0.4
 
-        wind = p["wind"]
+        wind = p["wind"] * (0.4 + 0.9 * k)
         c = self.noise.fbm(X * 0.22 - t * 0.35 * wind, Y * 0.4 + t * 0.04, octaves=3)
-        c = np.clip((c - 0.35) * 1.8, 0, 1) * p["clouds"]
+        c = np.clip((c - 0.35) * 1.8, 0, 1) * p["clouds"] * (0.5 + 0.5 * k)
         out = CLOUD_DARK + (CLOUD_LIT - CLOUD_DARK) * c[:, None]
 
         light = np.zeros(N)
@@ -101,7 +121,7 @@ class Storm(Effect):
         out = out + GLOW * light[:, None] + BOLT * bolt[:, None]
 
         if p["rain"] > 0:
-            out = out + RAIN * self._rain(dt, p["rain"], wind)[:, None]
+            out = out + RAIN * self._rain(dt, p["rain"] * (0.2 + 1.3 * k), wind)[:, None]
         return np.clip(out, 0, 1)
 
     def _rain(self, dt, density, wind):
