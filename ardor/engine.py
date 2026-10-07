@@ -1,0 +1,166 @@
+"""Render loop: runs the active effect, cross-fades between effects, applies overlays and brightness,
+streams frames to the keyboard and reconnects if the cable is pulled."""
+import ctypes, threading, time
+import numpy as np
+from . import layout
+from .device import Keyboard, DeviceNotFound, FRAME
+from .effects import BY_NAME
+
+FADE = 0.5
+_gaks = ctypes.windll.user32.GetAsyncKeyState
+
+
+class Engine:
+    def __init__(self, effect="storm", fps=60, params=None):
+        self.fps = fps
+        self.params = params or {}          # {effect_name: {param: value}}
+        self.brightness = 1.0               # software brightness 0..1
+        self.enabled = True
+        self.calm = False                   # manual calm (Ctrl+Alt+Home)
+        self.auto_calm = False              # set while a fullscreen game runs
+        self.override = None                # effect name forced by lock screen etc.
+        self.overlays = []
+        self.status = "запуск"
+        self.frame = np.zeros((layout.N, 3))   # last rendered frame, read by the preview
+        self._lock = threading.Lock()
+        self._effects = {}
+        self._current = effect
+        self._fading_from, self._fade_t0 = None, 0.0
+        self._prev_keys = np.zeros(len(layout.SLOT_VK), bool)
+        self._stop = threading.Event()
+        self._thread = None
+        self._kb = None
+        self._hw_saved = None           # keyboard's own lighting config, restored on exit
+        self._paused = False
+
+    # --- control (thread-safe) ------------------------------------------------
+    @property
+    def effect(self):
+        return self._current
+
+    def effect_obj(self, name):
+        with self._lock:
+            return self._get(name)
+
+    def _get(self, name):
+        if name not in self._effects:
+            self._effects[name] = BY_NAME[name](**self.params.get(name, {}))
+        return self._effects[name]
+
+    def set_effect(self, name):
+        with self._lock:
+            if name == self._current:
+                return
+            self._fading_from, self._fade_t0 = self._current, time.perf_counter()
+            self._current = name
+
+    def step_effect(self, delta):
+        names = [n for n in BY_NAME if n != "off"]
+        i = names.index(self._current) if self._current in names else 0
+        self.set_effect(names[(i + delta) % len(names)])
+
+    def set_param(self, effect, name, value):
+        self.params.setdefault(effect, {})[name] = value
+        with self._lock:
+            if effect in self._effects:
+                self._effects[effect].set(name, value)
+
+    # --- lifecycle ------------------------------------------------------------
+    def start(self):
+        self._thread = threading.Thread(target=self._run, name="ardor-engine", daemon=True)
+        self._thread.start()
+
+    def pause(self):
+        """Before system sleep: switch the keyboard's LEDs off and release it."""
+        self._paused = True
+
+    def resume(self):
+        self._paused = False
+
+    def stop(self):
+        self._stop.set()
+        if self._thread:
+            self._thread.join(2)
+
+    def _connect(self):
+        try:
+            self._kb = Keyboard()
+            self._kb.start_stream(4, known=self._hw_saved)
+            self._hw_saved = self._kb.saved
+            self.status = "подключено"
+        except (DeviceNotFound, OSError) as e:
+            self._kb = None
+            self.status = "нет клавиатуры" if isinstance(e, DeviceNotFound) else f"ошибка: {e}"
+
+    def _presses(self):
+        down = np.array([bool(_gaks(vk) & 0x8000) for _, vk in layout.SLOT_VK])
+        new = down & ~self._prev_keys
+        self._prev_keys = down
+        return [layout.SLOT_VK[k][0] for k in np.flatnonzero(new)]
+
+    def _render(self, t, dt):
+        calm = self.calm or self.auto_calm
+        presses = self._presses()
+        if calm:
+            presses = []
+        with self._lock:
+            name = self.override or self._current
+            out = self._get(name).render(t, dt, presses, calm)
+            if self._fading_from and not self.override:
+                a = (time.perf_counter() - self._fade_t0) / FADE
+                if a >= 1:
+                    self._fading_from = None
+                else:
+                    old = self._get(self._fading_from).render(t, dt, [], calm)
+                    out = old * (1 - a) + out * a
+        for ov in self.overlays:
+            if ov.enabled:
+                out = ov.apply(out, t, dt)
+        if not self.enabled:
+            out = np.zeros_like(out)
+        return np.clip(out * self.brightness, 0, 1)
+
+    def _run(self):
+        t0 = last = time.perf_counter()
+        next_try = 0.0
+        while not self._stop.is_set():
+            start = time.perf_counter()
+            t, dt = start - t0, min(0.1, start - last)
+            last = start
+            if self._paused:
+                if self._kb is not None:
+                    try:
+                        self._kb.lights_off()
+                        self._kb.close(restore=False)
+                    except OSError:
+                        pass
+                    self._kb = None
+                    self.status = "сон"
+                self._stop.wait(0.2)
+                continue
+            if self._kb is None and start >= next_try:
+                self._connect()
+                next_try = start + 2
+            out = self._render(t, dt)
+            self.frame = out
+            if self._kb is not None:
+                buf = np.zeros((FRAME // 3, 3), np.uint8)
+                buf[layout.LEDS] = (out * 255 + 0.5).astype(np.uint8)
+                for dst, src in layout.MIRROR.items():
+                    buf[dst] = buf[src]
+                try:
+                    self._kb.send(buf.tobytes())
+                except OSError:
+                    self.status = "клавиатура отключена"
+                    try:
+                        self._kb.close(restore=False)
+                    except OSError:
+                        pass
+                    self._kb = None
+            self._stop.wait(max(0.0, 1 / self.fps - (time.perf_counter() - start)))
+        if self._kb is not None:
+            try:
+                self._kb.close()
+            except OSError:
+                pass
+            self.status = "остановлено"
