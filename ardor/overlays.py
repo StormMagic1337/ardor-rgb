@@ -130,7 +130,7 @@ class NotifyOverlay(Overlay):
         if not self.events and self.esc_hue is None:
             return out
         out = out.copy()
-        d = np.hypot(layout.X - layout.W / 2, (layout.Y - 2.6) * 1.6)
+        d = np.hypot(layout.X - layout.W / 2, (layout.Y - layout.CY) * 1.6)
         for t0, hue in self.events:
             for k in range(2):                                   # two rings, 0.5 s apart
                 age = t - t0 - k * 0.5

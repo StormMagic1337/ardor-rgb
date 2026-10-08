@@ -1,6 +1,7 @@
 """Storm: dark drifting clouds, sheet lightning inside them and branching bolts. A key press calls a bolt into it."""
 import numpy as np
 from .base import Effect, Param, Noise, X, Y, N
+from .. import layout
 
 CLOUD_DARK = np.array([0.010, 0.014, 0.030])
 CLOUD_LIT = np.array([0.16, 0.18, 0.26])
@@ -43,7 +44,7 @@ class Storm(Effect):
 
     def _bolt(self, target=None):
         if target is None:
-            x0 = self.rng.uniform(1, 18)
+            x0 = self.rng.uniform(1, layout.W - 0.4)
             pts = self._path(x0, self.rng.uniform(3.5, 5.0))
         else:
             tx, ty = X[target], Y[target]
@@ -65,7 +66,7 @@ class Storm(Effect):
             core, glow = self._bolt(target)
             kind = "bolt"
         else:
-            cx = self.rng.uniform(0, 19)
+            cx = self.rng.uniform(0, layout.W + 0.6)
             core = np.zeros(N)
             glow = np.exp(-((X - cx) ** 2) / self.rng.uniform(15, 60))
             kind = "sheet"
@@ -126,7 +127,7 @@ class Storm(Effect):
 
     def _rain(self, dt, density, wind):
         if self.rng.random() < density * 0.6:
-            self.drops.append([self.rng.uniform(0, 19.5), -0.5, self.rng.uniform(7, 10)])
+            self.drops.append([self.rng.uniform(0, layout.W + 1.1), -0.5, self.rng.uniform(7, 10)])
         v = np.zeros(N)
         keep = []
         for d in self.drops:

@@ -66,6 +66,8 @@ APP_NAME = "ArdorRGB"
 
 
 def autostart_command():
+    if getattr(sys, "frozen", False):                  # PyInstaller build: the exe itself
+        return f'"{sys.executable}" --tray'
     pyw = Path(sys.executable).with_name("pythonw.exe")
     app = Path(__file__).resolve().parent.parent / "app.py"
     return f'"{pyw}" "{app}" --tray'

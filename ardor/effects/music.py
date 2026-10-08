@@ -5,7 +5,7 @@ from ..audio import Audio, N_BANDS
 from .. import layout
 
 COL = np.clip((X / layout.W * N_BANDS).astype(int), 0, N_BANDS - 1)   # key -> band
-HEIGHT = (5.2 - Y) / 5.2                                                # 0 at bottom row, 1 at F-row
+HEIGHT = (layout.YMAX - Y) / layout.YMAX                                               # 0 at bottom row, 1 at F-row
 
 
 class Equalizer(Effect):
@@ -58,7 +58,7 @@ class Pulse(Effect):
             self.hue += self.p["hue_step"]
             self.rings.append((t, self.hue))
         self.rings = [r for r in self.rings if t - r[0] < 0.8]
-        cx, cy = 9.0, 2.6
+        cx, cy = layout.W * 9.0 / 18.4, layout.CY
         d = np.hypot(X - cx, (Y - cy) * 1.6)
         ring = np.zeros(N)
         for t0, h in self.rings:

@@ -7,3 +7,6 @@ dist/
 *.spec
 probe_result.json
 tools/sniff_steps.log
+
+# tools/aula_hidlog build output
+tools/aula_hidlog/hid.dll

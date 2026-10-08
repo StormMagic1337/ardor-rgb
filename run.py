@@ -4,7 +4,8 @@
   python run.py storm --calm             no reaction to key presses
   python run.py fire --cpu --volume      with CPU (F-row) and volume (number row) indicators
   python run.py --list                   effects and their parameters
-Ctrl+C stops and restores the keyboard's own lighting mode. Close Guardian first."""
+Ctrl+C stops and restores the keyboard's own lighting mode. Close the vendor app (Guardian, OemDrv) first.
+ARDOR_BOARD=aula_f75 / guardian picks the keyboard if both are connected."""
 import sys, time
 sys.stdout.reconfigure(encoding="utf-8")
 from ardor.engine import Engine

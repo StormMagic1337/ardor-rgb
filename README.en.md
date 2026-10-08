@@ -1,8 +1,8 @@
 # ARDOR RGB
 
-**Live lighting for the ARDOR GAMING Guardian keyboard.** A thunderstorm whose lightning strikes the key you press, the actual weather outside, fire that flares up as you type, an equalizer for any audio playing on your PC, a wave across the keys when someone writes to you in Telegram or Discord, CPU-load and volume indicators right on the keys.
+**Live lighting for the ARDOR GAMING Guardian and AULA F75 keyboards.** A thunderstorm whose lightning strikes the key you press, the actual weather outside, fire that flares up as you type, an equalizer for any audio playing on your PC, a wave across the keys when someone writes to you in Telegram or Discord, CPU-load and volume indicators right on the keys.
 
-[Русская версия](README.md) · [All effects](docs/EFFECTS.en.md) · [USB protocol](docs/PROTOCOL.en.md) · [Changelog](CHANGELOG.md)
+[Русская версия](README.md) · [All effects](docs/EFFECTS.en.md) · [USB protocol](docs/PROTOCOL.en.md) ([AULA F75](docs/PROTOCOL_AULA.en.md)) · [Changelog](CHANGELOG.md)
 
 > The app UI and the architecture / contributing docs are in Russian. This page, the effect catalogue, the protocol description and the changelog are in English.
 
@@ -45,9 +45,11 @@ The stock Guardian app only switches between the lighting modes built into the k
 |---|---|---|---|
 | ARDOR GAMING Guardian (98%) | `320F:5055` | wired | ✅ tested |
 | ARDOR GAMING Guardian (98%) | `320F:5088` (dongle) | 2.4 GHz | 🔬 protocol works, not in the app yet |
+| AULA F75 (75%) | `258A:010C` | wired | ✅ tested ([protocol](docs/PROTOCOL_AULA.en.md)) |
+| AULA F75 (75%) | `3554:FA09` (receiver) | 2.4 GHz | ❌ different protocol, not decoded |
 | Other Telink / EVision `320F:5055` boards | `320F:5055` | wired | ❓ protocol likely the same, LED map will differ |
 
-Windows 10 / 11 only. The app works over the cable. Over the radio the protocol was verified (about 14 full frames per second versus 60 over the cable, see the [protocol](docs/PROTOCOL.en.md#wireless-24-ghz)); support is planned. For another model, the LED map can be captured with `tools/probe.py` — see [CONTRIBUTING](docs/CONTRIBUTING.md) (in Russian) or open an issue.
+Windows 10 / 11 only. The app works over the cable. Over the radio the protocol was verified (about 14 full frames per second versus 60 over the cable, see the [protocol](docs/PROTOCOL.en.md#wireless-24-ghz)); support is planned. The app finds whichever supported keyboard is plugged in; with both connected, pick one with `"board": "guardian"` / `"aula_f75"` in `settings.json` or the `ARDOR_BOARD` environment variable (chosen at start). The AULA F75 runs at 30 fps (Guardian: 60) and is kept in its "off" effect while the app runs — the only effect it shows streamed frames over; the "firmware rainbow wave" exit mode is not available on it. For another model, the LED map can be captured with `tools/probe.py` — see [CONTRIBUTING](docs/CONTRIBUTING.md) (in Russian) or open an issue.
 
 ## Install
 
@@ -65,7 +67,7 @@ The USB package is **`hidapi`** (imported as `hid`). Do not install the unrelate
 
 ## Run
 
-**Close the Guardian app first** — both talk to the same keyboard interface.
+**Close the vendor app first** (Guardian, or AULA's OemDrv.exe, including its tray icon) — both talk to the same keyboard interface.
 
 ```powershell
 pythonw app.py           # window
@@ -83,7 +85,7 @@ python run.py storm frequency=2 rain=0
 
 ## How it works
 
-On start the app reads the keyboard's lighting config, saves it and switches the keyboard into **streaming mode**. A render thread then computes each frame with NumPy (one vectorised expression for all keys), applies overlays and brightness, and sends it as seven 64-byte HID reports. On exit the saved config (or the chosen "when closed" mode) is written back. Nothing is flashed — see the [protocol description](docs/PROTOCOL.en.md).
+On start the app reads the keyboard's lighting config, saves it and switches the keyboard into **streaming mode**. A render thread then computes each frame with NumPy (one vectorised expression for all keys), applies overlays and brightness, and sends it over USB (Guardian: seven 64-byte HID reports; AULA F75: one 520-byte feature report, 30 times per second). On exit the saved config (or the chosen "when closed" mode) is written back. Nothing is flashed — see the [protocol description](docs/PROTOCOL.en.md).
 
 Stack: Python, PySide6 (Qt 6), hidapi, NumPy, psutil, pycaw, PyAudioWPatch, WinAPI via ctypes.
 
@@ -99,6 +101,7 @@ Privacy:
 - **This is an unofficial project.** It is not affiliated with, endorsed or supported by ARDOR GAMING, DNS or the controller vendor. ARDOR GAMING, Guardian and other names are trademarks of their owners and are used only to state compatibility.
 - The protocol was reverse-engineered from USB traffic between the keyboard and the vendor app for interoperability. The firmware is never read or modified.
 - The app writes the lighting-mode config (command `0x06`, exactly what the vendor app does when you pick a mode) and colour frames into the keyboard's RAM (command `0x12`, lost on power-off). With the "effect snapshot" exit mode it also writes per-key colours once on exit (command `0x0B`, as the vendor app does when saving a custom mode). The original mode is restored on exit unless you chose another one.
+- AULA F75: the app writes the lighting config (command `0x04`, as the AULA app does when you pick an effect) and frames into RAM (command `0x08`, as its music mode does); on exit to "static colour" / "breathing" the effect colour table (`0x0A`), to "effect snapshot" per-key colours (`0x06`). See the [AULA protocol](docs/PROTOCOL_AULA.en.md).
 - Provided "as is", without warranty of any kind (see [LICENSE](LICENSE)). Use at your own risk.
 
 ## Roadmap

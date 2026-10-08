@@ -1,7 +1,7 @@
 """ARDOR RGB - window + tray app.
   pythonw app.py           open the window
   pythonw app.py --tray    start hidden in the tray (used by autostart)
-Close Guardian before using it: both talk to the same keyboard interface."""
+Close the vendor app (Guardian, OemDrv) before using it: both talk to the same keyboard interface."""
 import sys, time
 from PySide6.QtCore import Qt, QTimer, QObject, Signal, QRectF, QAbstractNativeEventFilter
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QPainter, QPixmap, QLinearGradient, QFont
@@ -101,7 +101,7 @@ class KeyboardPreview(QWidget):
         for k, led in enumerate(layout.LEDS):
             name = layout.NAMES[led]
             x, y = layout.POS[led]
-            w, h = WIDE.get(name, 1.0), TALL.get(name, 1.0)
+            w, h = layout.SIZE.get(led) or (WIDE.get(name, 1.0), TALL.get(name, 1.0))
             rect = QRectF(ox + (x + 0.5 - w / 2) * unit + 2, oy + (y + 0.5 - h / 2) * unit + 2,
                           w * unit - 4, h * unit - 4)
             r, g, b = (frame[k] * 255).astype(int) if k < len(frame) else (0, 0, 0)
@@ -262,7 +262,7 @@ class MainWindow(QMainWindow):
         self.engine, self.cfg = engine, cfg
         self.quitting = False
         self._save_timer = QTimer(self, singleShot=True, interval=600, timeout=self._save)
-        self.setWindowTitle("ARDOR RGB")
+        self.setWindowTitle(f"ARDOR RGB — {layout.TITLE}")
         self.setWindowIcon(make_icon())
         self.resize(1100, 640)
 
@@ -448,7 +448,7 @@ class MainWindow(QMainWindow):
 
 def build_tray(app, win, engine):
     tray = QSystemTrayIcon(make_icon(), app)
-    tray.setToolTip("ARDOR RGB")
+    tray.setToolTip(f"ARDOR RGB — {layout.TITLE}")
     menu = QMenu()
     menu.addAction("Открыть окно", lambda: (win.showNormal(), win.activateWindow()))
     fx = menu.addMenu("Эффект")

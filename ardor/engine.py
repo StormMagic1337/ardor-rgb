@@ -3,14 +3,14 @@ streams frames to the keyboard and reconnects if the cable is pulled."""
 import ctypes, threading, time
 import numpy as np
 from . import layout
-from .device import (Keyboard, DeviceNotFound, FRAME, MODE_OFF, MODE_WAVE, MODE_BREATHE, MODE_STATIC,
-                     MODE_CUSTOM)
+from .device import Keyboard, DeviceNotFound, FRAME, MAX_FPS, EXIT_MODES as _BOARD_EXIT_MODES
 from .effects.base import hsv
 from .effects import BY_NAME
 
 FADE = 0.5
-EXIT_MODES = {"restore": "Как было до запуска", "off": "Выключено", "static": "Статичный цвет",
-              "breathe": "Дыхание", "wave": "Радужная волна (прошивка)", "snapshot": "Снимок текущего эффекта"}
+_EXIT_TITLES = {"restore": "Как было до запуска", "off": "Выключено", "static": "Статичный цвет",
+                "breathe": "Дыхание", "wave": "Радужная волна (прошивка)", "snapshot": "Снимок текущего эффекта"}
+EXIT_MODES = {k: v for k, v in _EXIT_TITLES.items() if k in _BOARD_EXIT_MODES}    # what this keyboard can do
 _gaks = ctypes.windll.user32.GetAsyncKeyState
 
 
@@ -23,7 +23,7 @@ def cut_dark(out, level):
 
 class Engine:
     def __init__(self, effect="storm", fps=60, params=None):
-        self.fps = fps
+        self.fps = min(fps, MAX_FPS)
         self.params = params or {}          # {effect_name: {param: value}}
         self.brightness = 1.0               # software brightness 0..1
         self.enabled = True
@@ -190,22 +190,6 @@ class Engine:
         return buf.tobytes()
 
     def _leave_keyboard(self):
-        kb, mode = self._kb, self.exit_mode
-        if mode == "restore" or not kb.saved:
-            kb.close()
-            return
-        cfg = bytearray(kb.saved)
-        cfg[2] = 4
+        mode = self.exit_mode if self.exit_mode in EXIT_MODES else "restore"
         rgb = bytes((hsv(np.array([self.exit_hue]), 1, 1)[0] * 255).astype(np.uint8))
-        frame = None
-        if mode == "off":
-            cfg[1] = MODE_OFF
-        elif mode in ("static", "breathe"):
-            cfg[1] = MODE_STATIC if mode == "static" else MODE_BREATHE
-            cfg[5], cfg[6:9] = 0, rgb
-        elif mode == "wave":
-            cfg[1], cfg[5] = MODE_WAVE, 1
-        elif mode == "snapshot":
-            cfg[1] = MODE_CUSTOM
-            frame = self._to_bytes(self.frame)
-        kb.exit_to(bytes(cfg), frame)
+        self._kb.leave(mode, rgb, self._to_bytes(self.frame))

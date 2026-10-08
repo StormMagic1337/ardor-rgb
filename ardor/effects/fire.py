@@ -58,7 +58,7 @@ class Fire(Effect):
             self.acc -= 1
 
         if self.rng.random() < dt * 4 * p["sparks"]:
-            self._spawn_sparks(self.rng.uniform(0, 19.5), 5.2, 1)
+            self._spawn_sparks(self.rng.uniform(0, layout.W + 1.1), layout.YMAX, 1)
         sp = self.sparks
         sp[:, 1] += sp[:, 2] * dt
         sp[:, 0] += (np.sin(sp[:, 1] * 3 + sp[:, 3] * 10) * 0.8 + p["wind"]) * dt

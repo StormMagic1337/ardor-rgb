@@ -1,6 +1,7 @@
 """Rain: falling drops with trails, wind, splashes on the bottom row; a key press splashes where you hit."""
 import numpy as np
 from .base import Effect, Param, Noise, hsv, X, Y, N
+from .. import layout
 
 
 class Rain(Effect):
@@ -29,13 +30,13 @@ class Rain(Effect):
 
         spawn = self.rng.poisson(dt * 9 * p["density"])
         if spawn:
-            new = np.column_stack([self.rng.uniform(-2, 21.5, spawn), self.rng.uniform(-1.5, -0.3, spawn),
+            new = np.column_stack([self.rng.uniform(-2, layout.W + 3.1, spawn), self.rng.uniform(-1.5, -0.3, spawn),
                                    self.rng.uniform(7, 12, spawn), self.rng.uniform(0.5, 1.0, spawn)])
             self.drops = np.vstack([self.drops, new])
         d = self.drops
         d[:, 1] += d[:, 2] * p["speed"] * dt
         d[:, 0] += p["wind"] * d[:, 2] * p["speed"] * dt * 0.25
-        landed = d[:, 1] >= 5.2
+        landed = d[:, 1] >= layout.YMAX
         for x, _, _, b in d[landed]:
             self._splash(x, 5.0, t, b * 0.7)
         self.drops = d = d[~landed]

@@ -4,6 +4,8 @@ from .base import Effect, Param, Noise, hsv, X, Y, N
 from .. import layout
 from .fire import ROWS, COLS, palette
 
+FIRE_X = layout.W * 8.5 / 18.4             # campfire centre, a bit left of the middle
+
 
 def particles_glow(px, py, strength, radius=0.6, yscale=1.2):
     """Brightness at every key from point particles (arrays px, py, strength)."""
@@ -74,7 +76,7 @@ class Meteors(Effect):
     def _spawn(self, t, target=None):
         if target is None:
             vx = self.rng.choice([-1, 1]) * self.rng.uniform(9, 14)
-            x0 = self.rng.uniform(2, 17) - vx * 0.15
+            x0 = self.rng.uniform(2, layout.W - 1.4) - vx * 0.15
             self.m.append((x0, -0.5, vx, self.rng.uniform(3, 6), t, self.rng.uniform(0.6, 1.0), None))
         else:
             tx, ty = X[target], Y[target]
@@ -123,7 +125,7 @@ class Fireflies(Effect):
     ]
 
     def reset(self):
-        self.pos = np.column_stack([self.rng.uniform(0, 18.4, 25), self.rng.uniform(0, 5.2, 25)])
+        self.pos = np.column_stack([self.rng.uniform(0, layout.W, 25), self.rng.uniform(0, layout.YMAX, 25)])
         self.vel = np.zeros((25, 2))
         self.phase = self.rng.uniform(0, 6.3, 25)
         self.rate = self.rng.uniform(0.4, 1.0, 25)
@@ -141,10 +143,10 @@ class Fireflies(Effect):
             acc += (np.array(self.lure[:2]) - self.pos) * 0.8
         self.vel = (self.vel + acc * dt) * np.exp(-dt * 1.2)
         self.pos += self.vel * dt * p["speed"]
-        self.pos[:, 0] = np.clip(self.pos[:, 0], 0, 18.4)
-        self.pos[:, 1] = np.clip(self.pos[:, 1], 0, 5.2)
-        self.vel[(self.pos[:, 0] <= 0) | (self.pos[:, 0] >= 18.4), 0] *= -1
-        self.vel[(self.pos[:, 1] <= 0) | (self.pos[:, 1] >= 5.2), 1] *= -1
+        self.pos[:, 0] = np.clip(self.pos[:, 0], 0, layout.W)
+        self.pos[:, 1] = np.clip(self.pos[:, 1], 0, layout.YMAX)
+        self.vel[(self.pos[:, 0] <= 0) | (self.pos[:, 0] >= layout.W), 0] *= -1
+        self.vel[(self.pos[:, 1] <= 0) | (self.pos[:, 1] >= layout.YMAX), 1] *= -1
         blink = np.clip(np.sin(t * self.rate * 1.5 + self.phase) * 1.6 - 0.3, 0, 1) ** 1.5
         g = particles_glow(self.pos[:n, 0], self.pos[:n, 1], blink[:n], radius=1.1)
         out = hsv(np.full(N, 0.4), 0.8, np.full(N, 0.015 + 0.01 * (Y > 3)))
@@ -207,7 +209,7 @@ class Campfire(Effect):
         self.boost *= np.exp(-dt / 0.8)
         width = 3.2 * p["size"] * (1 + 0.4 * self.boost)
         cols = np.arange(COLS) / (COLS - 1) * layout.W
-        source = np.exp(-((cols - 8.5) / width) ** 2)
+        source = np.exp(-((cols - FIRE_X) / width) ** 2)
         self.acc += dt * 45
         while self.acc >= 1:
             h = self.heat
@@ -218,10 +220,10 @@ class Campfire(Effect):
             self.acc -= 1
         heat = layout.sample(self.heat)
         flicker = 0.75 + 0.25 * self.noise(t * 3, 1.7)
-        ambient = p["glow"] * 0.22 * flicker * np.exp(-((X - 8.5) / 7) ** 2) * (0.4 + 0.6 * Y / 5.2)
+        ambient = p["glow"] * 0.22 * flicker * np.exp(-((X - FIRE_X) / 7) ** 2) * (0.4 + 0.6 * Y / layout.YMAX)
         out = palette(heat) + np.array([1.0, 0.35, 0.05]) * ambient[:, None]
         if self.rng.random() < dt * 2.5 * p["sparks"] * (1 + 3 * self.boost):
-            s = np.array([[8.5 + self.rng.normal(0, width * 0.4), 4.5, -self.rng.uniform(1.5, 3.5), 1.0]])
+            s = np.array([[FIRE_X + self.rng.normal(0, width * 0.4), 4.5, -self.rng.uniform(1.5, 3.5), 1.0]])
             self.sparks = np.vstack([self.sparks, s])
         sp = self.sparks
         sp[:, 1] += sp[:, 2] * dt
@@ -282,7 +284,7 @@ class LavaLamp(Effect):
     ]
 
     def reset(self):
-        self.bx = self.rng.uniform(1, 17.4, 10)
+        self.bx = self.rng.uniform(1, layout.W - 1.0, 10)
         self.ph = self.rng.uniform(0, 6.3, 10)
         self.per = self.rng.uniform(9, 18, 10)
         self.r = self.rng.uniform(1.0, 1.7, 10)
@@ -295,7 +297,7 @@ class LavaLamp(Effect):
         self.pops = [q for q in self.pops if t - q[2] < 2.5]
         n = int(p["blobs"])
         ts = t * p["speed"]
-        by = 2.6 - 3.3 * np.sin(2 * np.pi * ts / self.per[:n] + self.ph[:n])         # rise and sink
+        by = layout.CY - 3.3 * np.sin(2 * np.pi * ts / self.per[:n] + self.ph[:n])         # rise and sink
         bx = self.bx[:n] + 0.8 * np.sin(ts * 0.21 + self.ph[:n] * 2)
         r = self.r[:n] * (1 + 0.15 * np.sin(ts * 0.5 + self.ph[:n]))
         cx, cy, cr = list(bx), list(by), list(r)
@@ -306,6 +308,6 @@ class LavaLamp(Effect):
         d2 = (X[:, None] - cx[None, :]) ** 2 + ((Y[:, None] - cy[None, :]) * 1.4) ** 2
         field = (cr[None, :] ** 2 / (d2 + 0.05)).sum(1)
         blob = np.clip((field - 0.9) * 2.5, 0, 1)
-        liquid = hsv(np.full(N, p["hue_liquid"]), 0.9, 0.12 + 0.05 * Y / 5.2)
+        liquid = hsv(np.full(N, p["hue_liquid"]), 0.9, 0.12 + 0.05 * Y / layout.YMAX)
         lava = hsv(np.full(N, p["hue_blob"]) + 0.05 * np.clip(field - 1.5, 0, 1), 1, 0.6 + 0.4 * np.clip(field - 1, 0, 1))
         return np.clip(liquid * (1 - blob)[:, None] + lava * blob[:, None], 0, 1)

@@ -2,6 +2,32 @@
 
 [README](README.md) · [README (English)](README.en.md)
 
+## Не выпущено / Unreleased
+
+### Русский
+
+**Новая клавиатура: AULA F75** (75%, кабель, `258A:010C`)
+- Все эффекты, индикаторы и уведомления работают на AULA F75: 80 клавиш, 30 кадров в секунду.
+- Протокол восстановлен по обмену фирменной программы OemDrv с клавиатурой и проверен на живой клавиатуре — [PROTOCOL_AULA.md](docs/PROTOCOL_AULA.md).
+- Режимы «когда программа закрыта»: как было, выключено, статичный цвет, дыхание, снимок эффекта (радужной волны прошивки у AULA нет).
+- Инструменты: `tools/aula_hidlog` — подменная `hid.dll`, записывающая обмен фирменной программы; `tools/aula_analyze_log.py` — разбор лога по шагам.
+
+**Программа**
+- Клавиатура определяется автоматически; если подключены обе — выбор через `"board"` в `settings.json` или переменную `ARDOR_BOARD`. Название клавиатуры — в заголовке окна и подсказке трея.
+- Код клавиатур вынесен в `ardor/devices/` (протокол, раскладка, режимы выхода); эффекты больше не содержат размеров конкретной клавиатуры. На Guardian все эффекты дают те же кадры, что и раньше (проверено побайтно).
+
+### English
+
+**New keyboard: AULA F75** (75%, wired, `258A:010C`)
+- All effects, overlays and notifications work on the AULA F75: 80 keys, 30 fps.
+- Protocol reverse-engineered from the vendor app OemDrv and tested on a real keyboard — [PROTOCOL_AULA.en.md](docs/PROTOCOL_AULA.en.md).
+- "When closed" modes: as before, off, static colour, breathing, effect snapshot (the AULA has no firmware rainbow wave).
+- Tools: `tools/aula_hidlog`, a proxy `hid.dll` that logs the vendor app's traffic; `tools/aula_analyze_log.py` to decode the log step by step.
+
+**App**
+- The keyboard is detected automatically; with both connected, choose with `"board"` in `settings.json` or the `ARDOR_BOARD` variable. The keyboard's name is shown in the window title and tray tooltip.
+- Keyboard code moved to `ardor/devices/` (protocol, layout, exit modes); effects no longer hard-code one keyboard's dimensions. On the Guardian every effect renders the same frames as before (checked byte for byte).
+
 ## 0.2.0
 
 ### Русский

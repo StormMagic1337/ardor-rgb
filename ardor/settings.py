@@ -4,6 +4,7 @@ from pathlib import Path
 
 PATH = Path(os.environ["APPDATA"]) / "ardor-rgb" / "settings.json"
 DEFAULTS = {
+    "board": "auto",            # "auto" (whichever is plugged in), "guardian" or "aula_f75"
     "effect": "storm",
     "brightness": 1.0,
     "calm": False,

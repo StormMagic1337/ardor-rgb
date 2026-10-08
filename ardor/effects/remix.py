@@ -4,7 +4,7 @@ import numpy as np
 from .base import Effect, Param, Noise, hsv, X, Y, N
 from .. import layout
 
-CX, CY = layout.W / 2, 2.6
+CX, CY = layout.W / 2, layout.CY
 _R = np.hypot(X - CX, Y - CY)
 _ANG = np.arctan2(Y - CY, X - CX) / (2 * np.pi) % 1.0
 
@@ -15,7 +15,7 @@ DIRECTIONS = ("Слева направо", "Справа налево", "Све�
 def along(direction):
     """Position of every key along a direction, 0..1."""
     d = int(direction)
-    return [X / layout.W, 1 - X / layout.W, Y / 5.2, 1 - Y / 5.2,
+    return [X / layout.W, 1 - X / layout.W, Y / layout.YMAX, 1 - Y / layout.YMAX,
             _R / _R.max(), 1 - _R / _R.max(), _ANG, 1 - _ANG][d]
 
 
@@ -95,10 +95,10 @@ class Scanner(Effect):
 
     def render(self, t, dt, presses, calm):
         p = self.p
-        u = (Y / 5.2) if p["vertical"] else (X / layout.W)
+        u = (Y / layout.YMAX) if p["vertical"] else (X / layout.W)
         pos = 0.5 - 0.5 * np.cos(t * 1.2 * p["speed"])              # eases at both ends
         moving_right = np.sin(t * 1.2 * p["speed"]) > 0
-        size = p["width"] / (5.2 if p["vertical"] else layout.W)
+        size = p["width"] / (layout.YMAX if p["vertical"] else layout.W)
         d = (u - pos) * (1 if moving_right else -1)                  # >0 ahead of the beam, <0 behind
         head = np.exp(-(d / size) ** 2 * 3)
         tail = np.where(d < 0, np.exp(d / (size * (0.3 + 3 * p["trail"]))), 0) * p["trail"]
@@ -171,7 +171,7 @@ class RainbowFall(Effect):
 
     def render(self, t, dt, presses, calm):
         p = self.p
-        u = (1 - Y / 5.2) if p["up"] else Y / 5.2
+        u = (1 - Y / layout.YMAX) if p["up"] else Y / layout.YMAX
         return hsv(u / (1.2 * p["width"]) - t * 0.35 * p["speed"] + X * 0.01, 1, 1)
 
 
