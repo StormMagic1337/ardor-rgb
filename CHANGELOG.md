@@ -2,7 +2,7 @@
 
 [README](README.md) · [README (English)](README.en.md)
 
-## Не выпущено / Unreleased
+## 0.3.0 — 2026-10-08
 
 ### Русский
 
@@ -13,6 +13,7 @@
 - Инструменты: `tools/aula_hidlog` — подменная `hid.dll`, записывающая обмен фирменной программы; `tools/aula_analyze_log.py` — разбор лога по шагам.
 
 **Программа**
+- **Готовый `ARDOR-RGB.exe`** в Releases — без установки Python; сборка — `tools/build_exe.bat`.
 - Клавиатура определяется автоматически; если подключены обе — выбор через `"board"` в `settings.json` или переменную `ARDOR_BOARD`. Название клавиатуры — в заголовке окна и подсказке трея.
 - Код клавиатур вынесен в `ardor/devices/` (протокол, раскладка, режимы выхода); эффекты больше не содержат размеров конкретной клавиатуры. На Guardian все эффекты дают те же кадры, что и раньше (проверено побайтно).
 
@@ -25,6 +26,7 @@
 - Tools: `tools/aula_hidlog`, a proxy `hid.dll` that logs the vendor app's traffic; `tools/aula_analyze_log.py` to decode the log step by step.
 
 **App**
+- **Standalone `ARDOR-RGB.exe`** in Releases — no Python needed; build with `tools/build_exe.bat`.
 - The keyboard is detected automatically; with both connected, choose with `"board"` in `settings.json` or the `ARDOR_BOARD` variable. The keyboard's name is shown in the window title and tray tooltip.
 - Keyboard code moved to `ardor/devices/` (protocol, layout, exit modes); effects no longer hard-code one keyboard's dimensions. On the Guardian every effect renders the same frames as before (checked byte for byte).
 

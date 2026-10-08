@@ -72,7 +72,9 @@ ARDOR RGB берёт подсветку под полный контроль к�
 
 ## Установка
 
-Нужен **Python 3.10+** (проверено на 3.12) и **git**.
+**Проще всего:** скачайте `ARDOR-RGB.exe` со страницы [Releases](https://github.com/StormMagic1337/ardor-rgb/releases/latest) и запустите — Python не нужен. Один exe для обеих клавиатур. Windows может предупредить, что программа неизвестна (у неё нет цифровой подписи): «Подробнее» → «Выполнить в любом случае».
+
+**Из исходников:** нужен **Python 3.10+** (проверено на 3.12) и **git**.
 
 ```powershell
 git clone https://github.com/StormMagic1337/ardor-rgb.git
@@ -84,7 +86,7 @@ pip install -r requirements.txt
 
 > ⚠️ Пакет для USB называется **`hidapi`** (импортируется как `hid`). На PyPI есть другой, несовместимый пакет `hid` — его ставить не нужно.
 
-Готовый `.exe` без Python — в планах (см. ниже).
+Собрать exe самому: `pip install pyinstaller`, затем `tools\build_exe.bat` → `dist\ARDOR-RGB.exe`.
 
 ## Запуск
 
@@ -192,7 +194,7 @@ python run.py fire --cpu --volume         # с индикаторами CPU и �
 
 ## Планы
 
-- [ ] **Готовый `.exe`** (PyInstaller) в Releases — запуск без установки Python. *Приоритет.*
+- [x] **Готовый `.exe`** в [Releases](https://github.com/StormMagic1337/ardor-rgb/releases/latest) — запуск без установки Python.
 - [ ] Видео работы на живой клавиатуре.
 - [ ] Работа по радио (2.4 ГГц): отправка только изменившихся частей кадра, индикатор заряда батареи.
 - [ ] Настройки самой клавиатуры в окне: блокировка Win, WASD ↔ стрелки, anti-ghosting, частота опроса, автоповтор (команды снимаются утилитой `tools/sniff_steps.py`).

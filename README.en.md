@@ -53,7 +53,9 @@ Windows 10 / 11 only. The app works over the cable. Over the radio the protocol 
 
 ## Install
 
-Python 3.10+ (tested on 3.12):
+**Easiest:** download `ARDOR-RGB.exe` from [Releases](https://github.com/StormMagic1337/ardor-rgb/releases/latest) and run it — no Python needed, one exe for both keyboards. Windows may warn that the app is unrecognised (it is not code-signed): "More info" → "Run anyway".
+
+**From source:** Python 3.10+ (tested on 3.12):
 
 ```powershell
 git clone https://github.com/StormMagic1337/ardor-rgb.git
@@ -64,6 +66,8 @@ pip install -r requirements.txt
 ```
 
 The USB package is **`hidapi`** (imported as `hid`). Do not install the unrelated `hid` package from PyPI.
+
+To build the exe yourself: `pip install pyinstaller`, then `tools\build_exe.bat` → `dist\ARDOR-RGB.exe`.
 
 ## Run
 
@@ -106,7 +110,7 @@ Privacy:
 
 ## Roadmap
 
-- [ ] Standalone `.exe` (PyInstaller) in Releases — no Python needed. *Priority.*
+- [x] Standalone `.exe` in [Releases](https://github.com/StormMagic1337/ardor-rgb/releases/latest) — no Python needed.
 - [ ] Video of the real keyboard.
 - [ ] Radio (2.4 GHz) support: sending only the changed parts of a frame, a battery indicator.
 - [ ] Keyboard settings in the window: Win lock, WASD ↔ arrows, anti-ghosting, polling rate, key repeat (commands are captured with `tools/sniff_steps.py`).
