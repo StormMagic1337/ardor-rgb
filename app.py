@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFor
                                QListWidget, QListWidgetItem, QMainWindow, QMenu, QPushButton, QSlider,
                                QSystemTrayIcon, QVBoxLayout, QWidget)
 
-from ardor import layout, settings, winsys
+from ardor import __version__, layout, settings, winsys
 from ardor.engine import Engine, EXIT_MODES
 from ardor.effects import ALL as EFFECTS, BY_NAME
 from ardor.overlays import ALL as OVERLAYS, NotifyOverlay
@@ -262,7 +262,7 @@ class MainWindow(QMainWindow):
         self.engine, self.cfg = engine, cfg
         self.quitting = False
         self._save_timer = QTimer(self, singleShot=True, interval=600, timeout=self._save)
-        self.setWindowTitle(f"ARDOR RGB — {layout.TITLE}")
+        self.setWindowTitle(f"ARDOR RGB {__version__} — {layout.TITLE}")
         self.setWindowIcon(make_icon())
         self.resize(1100, 640)
 
@@ -448,7 +448,7 @@ class MainWindow(QMainWindow):
 
 def build_tray(app, win, engine):
     tray = QSystemTrayIcon(make_icon(), app)
-    tray.setToolTip(f"ARDOR RGB — {layout.TITLE}")
+    tray.setToolTip(f"ARDOR RGB {__version__} — {layout.TITLE}")
     menu = QMenu()
     menu.addAction("Открыть окно", lambda: (win.showNormal(), win.activateWindow()))
     fx = menu.addMenu("Эффект")
