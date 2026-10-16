@@ -5,3 +5,5 @@ psutil>=5.9
 pycaw>=20230407
 comtypes>=1.2
 PyAudioWPatch>=0.2.12
+dxcam>=0.3          # screen capture for the "Screen" effect (DXGI)
+mss>=9.0            # fallback screen capture (GDI)

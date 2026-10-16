@@ -10,9 +10,10 @@ from .remix import (ColorWave, Clouds, Spectrum, Vortex, RainbowRings, Scanner, 
 from .atmos import Snow, Meteors, Fireflies, Surf, Campfire, Glitch, LavaLamp
 from .weather_fx import WeatherOutside
 from .stats import Heatmap
+from .screen_fx import ScreenLight
 
 # Order = order in the GUI list and for Ctrl+Alt+Left/Right
-ALL = [Storm, WeatherOutside, Rain, Snow, Fire, Campfire, Equalizer, Pulse, Heatmap, Meteors, Fireflies, Surf, Matrix, Glitch,
+ALL = [Storm, WeatherOutside, Rain, Snow, Fire, Campfire, Equalizer, Pulse, ScreenLight, Heatmap, Meteors, Fireflies, Surf, Matrix, Glitch,
        Aurora, Liquid, LavaLamp,
        ColorWave, Clouds, Spectrum, Vortex, RainbowRings, RainbowFall, Scanner, Arrow, Mosaic, Geometry,
        Wave, Plasma, Ripple, Typing, Stars, FireClassic, Breathe, Static, Off]
