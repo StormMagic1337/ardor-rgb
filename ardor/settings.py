@@ -16,6 +16,7 @@ DEFAULTS = {
     "profiles": [],             # per-app profiles, see profiles.new_profile()
     "exit_mode": "restore",     # firmware mode left on the keyboard when the app stops (engine.EXIT_MODES)
     "exit_hue": 0.6,
+    "count_keys": True,         # count presses per key for the heat map (keystats.json)
     "true_black": False,        # cut near-black areas to fully off
     "black_level": 0.08,
 }

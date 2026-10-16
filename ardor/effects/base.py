@@ -12,8 +12,8 @@ class Param:
     lo: float
     hi: float
     default: float
-    kind: str = "float"          # "float" | "int" | "hue" | "bool" | "choice" | "text"
-    options: tuple = ()          # labels for "choice" (value = index)
+    kind: str = "float"          # "float" | "int" | "hue" | "bool" | "choice" | "text" | "button"
+    options: tuple = ()          # labels for "choice" (value = index); confirmation text for "button"
 
 
 class Effect:
@@ -33,6 +33,9 @@ class Effect:
 
     def set(self, name, value):
         self.p[name] = value
+
+    def action(self, name):
+        """A "button" param was clicked."""
 
     def reset(self):
         pass

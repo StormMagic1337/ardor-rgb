@@ -6,6 +6,7 @@ from . import layout
 from .device import Keyboard, DeviceNotFound, FRAME, MAX_FPS, EXIT_MODES as _BOARD_EXIT_MODES
 from .effects.base import hsv
 from .effects import BY_NAME
+from .keystats import STATS
 
 FADE = 0.5
 _EXIT_TITLES = {"restore": "Как было до запуска", "off": "Выключено", "static": "Статичный цвет",
@@ -30,6 +31,8 @@ class Engine:
         self.calm = False                   # manual calm (Ctrl+Alt+Home)
         self.auto_calm = False              # set while a fullscreen game runs
         self.override = None                # effect name forced by lock screen etc.
+        self.locked = False                 # PC locked: presses are not counted (password)
+        self.count_keys = True              # count presses for the heat map (keystats)
         self.profile = None                 # profiles.Active of the program in front, set by the app
         self.overlays = []
         self.status = "запуск"
@@ -119,6 +122,8 @@ class Engine:
         if prof and prof.calm is not None:
             calm = prof.calm
         presses = self._presses()
+        if presses and self.count_keys and not self.locked:
+            STATS.add([layout.NAMES[layout.LEDS[k]] for k in presses])
         if presses:
             for ov in self.overlays:
                 if hasattr(ov, "pressed"):
@@ -152,6 +157,7 @@ class Engine:
     def _run(self):
         t0 = last = time.perf_counter()
         next_try = 0.0
+        next_save = 60.0
         while not self._stop.is_set():
             start = time.perf_counter()
             t, dt = start - t0, min(0.1, start - last)
@@ -172,6 +178,9 @@ class Engine:
                 next_try = start + 2
             out = self._render(t, dt)
             self.frame = out
+            if t >= next_save:
+                STATS.save()
+                next_save = t + 60
             if self._kb is not None:
                 try:
                     self._kb.send(self._to_bytes(out))
@@ -183,6 +192,7 @@ class Engine:
                         pass
                     self._kb = None
             self._stop.wait(max(0.0, 1 / self.fps - (time.perf_counter() - start)))
+        STATS.save()
         if self._kb is not None:
             try:
                 self._leave_keyboard()

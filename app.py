@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, QTimer, QObject, Signal, QRectF, QAbstractNativeE
 from PySide6.QtGui import QAction, QActionGroup, QColor, QIcon, QPainter, QPixmap, QLinearGradient, QFont
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFormLayout, QLineEdit, QGridLayout, QGroupBox, QHBoxLayout, QLabel,
-                               QListWidget, QListWidgetItem, QMainWindow, QMenu, QPushButton, QSlider,
+                               QListWidget, QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPushButton, QSlider,
                                QSystemTrayIcon, QVBoxLayout, QWidget)
 
 from ardor import __version__, layout, profiles, settings, winsys
@@ -130,6 +130,11 @@ class ParamPanel(QGroupBox):
             return
         for pr in eff.params:
             value = eff.p[pr.name]
+            if pr.kind == "button":
+                w = QPushButton(pr.title)
+                w.clicked.connect(lambda _=False, n=pr.name, q=pr.options: self._action(name, n, q))
+                self.form.addRow("", w)
+                continue
             if pr.kind == "bool":
                 w = QCheckBox()
                 w.setChecked(bool(value))
@@ -160,6 +165,11 @@ class ParamPanel(QGroupBox):
     def _set(self, effect, param, value):
         self.engine.set_param(effect, param, value)
         self.on_change()
+
+    def _action(self, effect, param, confirm):
+        if confirm and QMessageBox.question(self, "ARDOR RGB", confirm[0]) != QMessageBox.Yes:
+            return
+        self.engine.effect_obj(effect).action(param)
 
     def _reset(self, effect):
         for pr in BY_NAME[effect.split("#")[0]].params:
@@ -558,6 +568,7 @@ class MainWindow(QMainWindow):
                     lambda v: self._cfg("lock_breathe", v))
         for ov in engine.overlays:
             self._check(g, ov.title, ov.enabled, lambda v, o=ov: self._overlay(o, v))
+        self._check(g, "Считать нажатия для тепловой карты (только на этом ПК)", engine.count_keys, self._count_keys)
         self._check(g, "Запускать вместе с Windows (в трее)", winsys.autostart_enabled(), winsys.set_autostart)
         notif = QPushButton("Уведомления: приложения и цвета…")
         notif.clicked.connect(self._notify_dialog)
@@ -626,6 +637,10 @@ class MainWindow(QMainWindow):
         self.engine.black_level = v / 100
         self._save_later()
 
+    def _count_keys(self, v):
+        self.engine.count_keys = v
+        self._save_later()
+
     def _calm(self, v):
         self.engine.calm = v
         self._save_later()
@@ -657,7 +672,7 @@ class MainWindow(QMainWindow):
         e = self.engine
         self.cfg.update(effect=e.effect, brightness=e.brightness, calm=e.calm, params=e.params,
                         exit_mode=e.exit_mode, exit_hue=e.exit_hue, true_black=e.true_black,
-                        black_level=e.black_level,
+                        black_level=e.black_level, count_keys=e.count_keys,
                         overlays={type(o).__name__: o.enabled for o in e.overlays})
         settings.save(self.cfg)
 
@@ -665,6 +680,7 @@ class MainWindow(QMainWindow):
     def _watch(self):
         e = self.engine
         locked = winsys.is_locked()
+        e.locked = locked
         e.override = "breathe" if locked and self.cfg["lock_breathe"] else None
         e.auto_calm = self.cfg["game_calm"] and not locked and winsys.fullscreen_app()
         prof = None if locked else profiles.match(self.cfg["profiles"], winsys.foreground_exe())
@@ -758,6 +774,7 @@ def main():
     engine.exit_mode = cfg["exit_mode"] if cfg["exit_mode"] in EXIT_MODES else "restore"
     engine.exit_hue = cfg["exit_hue"]
     engine.true_black, engine.black_level = cfg["true_black"], cfg["black_level"]
+    engine.count_keys = cfg["count_keys"]
     engine.overlays = [cls(enabled=cfg["overlays"].get(cls.__name__, False)) for cls in OVERLAYS]
     engine.start()
 
