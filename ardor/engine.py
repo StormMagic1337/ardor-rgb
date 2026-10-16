@@ -30,12 +30,14 @@ class Engine:
         self.calm = False                   # manual calm (Ctrl+Alt+Home)
         self.auto_calm = False              # set while a fullscreen game runs
         self.override = None                # effect name forced by lock screen etc.
+        self.profile = None                 # profiles.Active of the program in front, set by the app
         self.overlays = []
         self.status = "запуск"
         self.frame = np.zeros((layout.N, 3))   # last rendered frame, read by the preview
         self._lock = threading.Lock()
         self._effects = {}
-        self._current = effect
+        self._current = effect              # chosen in the window
+        self._shown = effect                # actually rendered (lock screen / profile may differ)
         self._fading_from, self._fade_t0 = None, 0.0
         self._prev_keys = np.zeros(len(layout.SLOT_VK), bool)
         self._stop = threading.Event()
@@ -57,16 +59,14 @@ class Engine:
         with self._lock:
             return self._get(name)
 
-    def _get(self, name):
-        if name not in self._effects:
-            self._effects[name] = BY_NAME[name](**self.params.get(name, {}))
-        return self._effects[name]
+    def _get(self, key):
+        """key is an effect name, or "<name>#<profile id>" for a profile's own instance with its own params."""
+        if key not in self._effects:
+            self._effects[key] = BY_NAME[key.split("#")[0]](**self.params.get(key, {}))
+        return self._effects[key]
 
     def set_effect(self, name):
         with self._lock:
-            if name == self._current:
-                return
-            self._fading_from, self._fade_t0 = self._current, time.perf_counter()
             self._current = name
 
     def step_effect(self, delta):
@@ -114,7 +114,10 @@ class Engine:
         return [layout.SLOT_VK[k][0] for k in np.flatnonzero(new)]
 
     def _render(self, t, dt):
+        prof = self.profile
         calm = self.calm or self.auto_calm
+        if prof and prof.calm is not None:
+            calm = prof.calm
         presses = self._presses()
         if presses:
             for ov in self.overlays:
@@ -123,9 +126,11 @@ class Engine:
         if calm:
             presses = []
         with self._lock:
-            name = self.override or self._current
+            name = self.override or (prof and prof.effect) or self._current
+            if name != self._shown:
+                self._fading_from, self._fade_t0, self._shown = self._shown, time.perf_counter(), name
             out = self._get(name).render(t, dt, presses, calm)
-            if self._fading_from and not self.override:
+            if self._fading_from:
                 a = (time.perf_counter() - self._fade_t0) / FADE
                 if a >= 1:
                     self._fading_from = None
@@ -134,12 +139,15 @@ class Engine:
                     out = old * (1 - a) + out * a
         if self.true_black:
             out = cut_dark(out, self.black_level)
+        if prof and not self.override:
+            out = prof.apply(out)
         for ov in self.overlays:
             if ov.enabled or ov.busy():
                 out = ov.apply(out, t, dt)
         if not self.enabled:
             out = np.zeros_like(out)
-        return np.clip(out * self.brightness, 0, 1)
+        bright = prof.brightness if prof and prof.brightness is not None else self.brightness
+        return np.clip(out * bright, 0, 1)
 
     def _run(self):
         t0 = last = time.perf_counter()

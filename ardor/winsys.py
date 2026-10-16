@@ -1,4 +1,4 @@
-"""Windows integration: global hotkeys, lock-screen / fullscreen detection, autostart."""
+"""Windows integration: global hotkeys, lock-screen / fullscreen detection, active window, autostart."""
 import ctypes, sys, threading, winreg
 from ctypes import wintypes
 from pathlib import Path
@@ -58,6 +58,52 @@ def fullscreen_app():
     if shell32.SHQueryUserNotificationState(ctypes.byref(state)) != 0:
         return False
     return state.value in (2, 3)          # QUNS_BUSY (fullscreen app), QUNS_RUNNING_D3D_FULL_SCREEN
+
+
+# --- active window ---------------------------------------------------------------
+kernel32 = ctypes.windll.kernel32
+user32.GetForegroundWindow.restype = wintypes.HWND
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+
+
+def window_exe(hwnd):
+    """File name of the process owning the window ("cod.exe"), lower case; "" if unknown."""
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    h = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+    if not h:
+        return ""
+    try:
+        buf, size = ctypes.create_unicode_buffer(1024), wintypes.DWORD(1024)
+        if not kernel32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(size)):
+            return ""
+        return Path(buf.value).name.lower()
+    finally:
+        kernel32.CloseHandle(h)
+
+
+def foreground_exe():
+    hwnd = user32.GetForegroundWindow()
+    return window_exe(hwnd) if hwnd else ""
+
+
+def open_windows():
+    """[(exe, title)] of visible top-level windows with a title, one entry per exe."""
+    found = {}
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def cb(hwnd, _):
+        n = user32.GetWindowTextLengthW(hwnd)
+        if n and user32.IsWindowVisible(hwnd):
+            title = ctypes.create_unicode_buffer(n + 1)
+            user32.GetWindowTextW(hwnd, title, n + 1)
+            exe = window_exe(hwnd)
+            if exe and exe not in found:
+                found[exe] = title.value
+        return True
+
+    user32.EnumWindows(cb, 0)
+    return sorted(found.items())
 
 
 # --- autostart (HKCU Run key) ---------------------------------------------------

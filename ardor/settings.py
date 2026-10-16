@@ -12,7 +12,8 @@ DEFAULTS = {
     "lock_breathe": True,       # slow breathing while the PC is locked
     "overlays": {"CpuOverlay": False, "VolumeOverlay": True, "NotifyOverlay": True},
     "notify_apps": None,        # None -> notifications.DEFAULT_APPS
-    "params": {},               # {effect: {param: value}}
+    "params": {},               # {effect: {param: value}}; "<effect>#<profile id>" for a profile's own effect
+    "profiles": [],             # per-app profiles, see profiles.new_profile()
     "exit_mode": "restore",     # firmware mode left on the keyboard when the app stops (engine.EXIT_MODES)
     "exit_hue": 0.6,
     "true_black": False,        # cut near-black areas to fully off

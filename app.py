@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QDialog, QFor
                                QListWidget, QListWidgetItem, QMainWindow, QMenu, QPushButton, QSlider,
                                QSystemTrayIcon, QVBoxLayout, QWidget)
 
-from ardor import __version__, layout, settings, winsys
+from ardor import __version__, layout, profiles, settings, winsys
 from ardor.engine import Engine, EXIT_MODES
 from ardor.effects import ALL as EFFECTS, BY_NAME
 from ardor.overlays import ALL as OVERLAYS, NotifyOverlay
@@ -162,7 +162,7 @@ class ParamPanel(QGroupBox):
         self.on_change()
 
     def _reset(self, effect):
-        for pr in BY_NAME[effect].params:
+        for pr in BY_NAME[effect.split("#")[0]].params:
             self.engine.set_param(effect, pr.name, pr.default)
         self.on_change()
         self.show_effect(effect)
@@ -256,6 +256,255 @@ class NotifyDialog(QDialog):
         self._rebuild()
 
 
+class ProfilesDialog(QDialog):
+    """Per-app profiles: list on the left, the selected profile's settings on the right."""
+
+    def __init__(self, parent, cfg, engine, on_change):
+        super().__init__(parent)
+        self.setWindowTitle("Профили приложений и игр")
+        self.engine, self.on_change = engine, on_change
+        self.items = cfg["profiles"]
+        self.setMinimumSize(880, 580)
+        outer = QVBoxLayout(self)
+        hint = QLabel("Пока окно программы активно, клавиатура показывает её профиль. Свернули игру или "
+                      "переключились (Alt+Tab) — подсветка возвращается к обычной.", objectName="status")
+        hint.setWordWrap(True)
+        outer.addWidget(hint)
+        body = QHBoxLayout()
+        outer.addLayout(body, 1)
+
+        left = QVBoxLayout()
+        body.addLayout(left)
+        self.list = QListWidget()
+        self.list.setFixedWidth(220)
+        self.list.currentRowChanged.connect(self._show)
+        left.addWidget(self.list, 1)
+        add = QPushButton("Добавить профиль")
+        add.clicked.connect(self._add)
+        left.addWidget(add)
+        self.rm = QPushButton("Удалить профиль")
+        self.rm.clicked.connect(self._remove)
+        left.addWidget(self.rm)
+
+        self.box = QGroupBox("Профиль")
+        body.addWidget(self.box, 1)
+        f = QFormLayout(self.box)
+        self.enabled = QCheckBox("Профиль включён")
+        self.enabled.toggled.connect(lambda v: self._set("enabled", v))
+        f.addRow(self.enabled)
+        self.name = QLineEdit()
+        self.name.textChanged.connect(self._rename)
+        f.addRow("Название", self.name)
+        exe_row = QHBoxLayout()
+        self.exe = QLineEdit()
+        self.exe.setPlaceholderText("cod.exe (несколько — через запятую)")
+        self.exe.textChanged.connect(lambda v: self._set("exe", v))
+        exe_row.addWidget(self.exe, 1)
+        pick = QPushButton("Выбрать окно…")
+        pick.clicked.connect(self._pick_window)
+        exe_row.addWidget(pick)
+        f.addRow("Программа", exe_row)
+
+        fx_row = QHBoxLayout()
+        self.effect = QComboBox()
+        self.effect.addItem("Не менять (как в главном окне)", "")
+        for cls in EFFECTS:
+            self.effect.addItem(cls.title, cls.name)
+        self.effect.currentIndexChanged.connect(self._effect)
+        fx_row.addWidget(self.effect, 1)
+        self.fx_params = QPushButton("Настройки эффекта…")
+        self.fx_params.clicked.connect(self._effect_params)
+        fx_row.addWidget(self.fx_params)
+        f.addRow("Эффект", fx_row)
+
+        br_row = QHBoxLayout()
+        self.own_bright = QCheckBox("своя")
+        self.own_bright.toggled.connect(self._bright_mode)
+        br_row.addWidget(self.own_bright)
+        self.bright = QSlider(Qt.Horizontal)
+        self.bright.setRange(0, 100)
+        self.bright.valueChanged.connect(lambda v: self._set("brightness", v / 100))
+        br_row.addWidget(self.bright, 1)
+        f.addRow("Яркость", br_row)
+        self.calm = QComboBox()
+        self.calm.addItems(profiles.CALM_CHOICES)
+        self.calm.currentIndexChanged.connect(lambda v: self._set("calm", v))
+        f.addRow("Спокойный режим", self.calm)
+
+        self.highlight = QCheckBox("Подсвечивать рабочие клавиши поверх эффекта")
+        self.highlight.toggled.connect(lambda v: self._set("highlight", v))
+        f.addRow(self.highlight)
+        preset_row = QHBoxLayout()
+        for title in profiles.PRESETS:
+            b = QPushButton(f"Набор «{title}»")
+            b.clicked.connect(lambda _=False, t=title: self._preset(t))
+            preset_row.addWidget(b)
+        preset_row.addStretch(1)
+        f.addRow("Заполнить", preset_row)
+        self.group_keys, self.group_hue = [], []
+        for i in range(profiles.GROUPS):
+            row = QHBoxLayout()
+            keys = QLineEdit()
+            keys.textChanged.connect(lambda v, i=i: self._group(i, "keys", v))
+            hue = QSlider(Qt.Horizontal)
+            hue.setRange(0, 200)
+            hue.setFixedWidth(150)
+            hue.setStyleSheet(HUE_GROOVE)
+            hue.valueChanged.connect(lambda v, i=i: self._group(i, "hue", v / 200))
+            row.addWidget(keys, 1)
+            row.addWidget(hue)
+            self.group_keys.append(keys)
+            self.group_hue.append(hue)
+            f.addRow(f"Группа {i + 1}", row)
+        self.unknown = QLabel(objectName="status")
+        self.unknown.setWordWrap(True)
+        f.addRow(self.unknown)
+        self.dim = QSlider(Qt.Horizontal)
+        self.dim.setRange(0, 100)
+        self.dim.valueChanged.connect(lambda v: self._set("dim", v / 100))
+        f.addRow("Остальные клавиши, яркость", self.dim)
+        keys_hint = QLabel("Клавиши — через пробел: W A S D Shift Ctrl Space Tab Q E R F1 Esc…", objectName="status")
+        keys_hint.setWordWrap(True)
+        f.addRow(keys_hint)
+
+        self._loading = False
+        self._refill(0)
+
+    # --- list -----------------------------------------------------------------
+    def _refill(self, row):
+        self.list.blockSignals(True)
+        self.list.clear()
+        for p in self.items:
+            self.list.addItem(p["name"])
+        self.list.blockSignals(False)
+        self.box.setEnabled(bool(self.items))
+        self.rm.setEnabled(bool(self.items))
+        if self.items:
+            self.list.setCurrentRow(min(max(row, 0), len(self.items) - 1))
+        self._show(self.list.currentRow())
+
+    def _cur(self):
+        r = self.list.currentRow()
+        return self.items[r] if 0 <= r < len(self.items) else None
+
+    def _show(self, _row):
+        p = self._cur()
+        if p is None:
+            return
+        self._loading = True
+        self.enabled.setChecked(p.get("enabled", True))
+        self.name.setText(p["name"])
+        self.exe.setText(p["exe"])
+        self.effect.setCurrentIndex(max(0, self.effect.findData(p.get("effect", ""))))
+        self.fx_params.setEnabled(bool(p.get("effect")))
+        own = p.get("brightness") is not None
+        self.own_bright.setChecked(own)
+        self.bright.setEnabled(own)
+        self.bright.setValue(int((p["brightness"] if own else self.engine.brightness) * 100))
+        self.calm.setCurrentIndex(int(p.get("calm", 0)))
+        self.highlight.setChecked(bool(p.get("highlight")))
+        groups = p.setdefault("groups", [])
+        while len(groups) < profiles.GROUPS:
+            groups.append({"keys": "", "hue": 0.0})
+        for i, g in enumerate(groups[:profiles.GROUPS]):
+            self.group_keys[i].setText(g["keys"])
+            self.group_hue[i].setValue(int(g["hue"] * 200))
+        self.dim.setValue(int(p.get("dim", 0.2) * 100))
+        self._loading = False
+        self._check_keys()
+
+    # --- edits ----------------------------------------------------------------
+    def _set(self, key, value):
+        p = self._cur()
+        if p is None or self._loading:
+            return
+        p[key] = value
+        self.on_change()
+
+    def _rename(self, v):
+        self._set("name", v)
+        if not self._loading and self.list.currentItem():
+            self.list.currentItem().setText(v)
+
+    def _group(self, i, key, value):
+        p = self._cur()
+        if p is None or self._loading:
+            return
+        p["groups"][i][key] = value
+        self._check_keys()
+        self.on_change()
+
+    def _check_keys(self):
+        bad = []
+        for g in (self._cur() or {}).get("groups", []):
+            bad += profiles.parse_keys(g["keys"])[1]
+        self.unknown.setText(("Нет на этой клавиатуре: " + ", ".join(bad)) if bad else "")
+
+    def _preset(self, title):
+        p = self._cur()
+        p["groups"] = [{"keys": k, "hue": h} for k, h in profiles.PRESETS[title]]
+        p["highlight"] = True
+        self._show(None)
+        self.on_change()
+
+    def _bright_mode(self, own):
+        if self._loading:
+            return
+        self.bright.setEnabled(own)
+        self._set("brightness", self.bright.value() / 100 if own else None)
+
+    def _effect(self, _i):
+        p = self._cur()
+        if p is None or self._loading:
+            return
+        name = self.effect.currentData()
+        p["effect"] = name
+        self.fx_params.setEnabled(bool(name))
+        key = profiles.effect_key(p)
+        if key and key not in self.engine.params:            # start from the main window's settings
+            self.engine.params[key] = dict(self.engine.params.get(name, {}))
+        self.on_change()
+
+    def _effect_params(self):
+        p = self._cur()
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"{p['name']}: {BY_NAME[p['effect']].title}")
+        dlg.setMinimumWidth(460)
+        panel = ParamPanel(self.engine, self.on_change)
+        panel.show_effect(profiles.effect_key(p))
+        QVBoxLayout(dlg).addWidget(panel)
+        dlg.exec()
+
+    def _pick_window(self):
+        menu = QMenu(self)
+        for exe, title in winsys.open_windows():
+            if exe in ("python.exe", "pythonw.exe", "ardor-rgb.exe", "explorer.exe", "applicationframehost.exe"):
+                continue
+            short = title if len(title) < 60 else title[:57] + "…"
+            menu.addAction(f"{exe}  —  {short}", lambda e=exe, t=title: self._use_window(e, t))
+        menu.exec(self.exe.mapToGlobal(self.exe.rect().bottomLeft()))
+
+    def _use_window(self, exe, title):
+        self.exe.setText(exe)
+        if self.name.text() in ("", "Новая игра"):
+            self.name.setText(title[:40] or exe)
+
+    def _add(self):
+        self.items.append(profiles.new_profile())
+        self.on_change()
+        self._refill(len(self.items) - 1)
+
+    def _remove(self):
+        p = self._cur()
+        if p is None:
+            return
+        self.items.remove(p)
+        for k in [k for k in self.engine.params if k.endswith("#" + p["id"])]:
+            del self.engine.params[k]
+        self.on_change()
+        self._refill(self.list.currentRow())
+
+
 class MainWindow(QMainWindow):
     def __init__(self, engine, cfg, bridge):
         super().__init__()
@@ -313,6 +562,9 @@ class MainWindow(QMainWindow):
         notif = QPushButton("Уведомления: приложения и цвета…")
         notif.clicked.connect(self._notify_dialog)
         g.addRow(notif)
+        prof = QPushButton("Профили приложений и игр…")
+        prof.clicked.connect(lambda: ProfilesDialog(self, self.cfg, self.engine, self._save_later).exec())
+        g.addRow(prof)
         self.exit_combo = QComboBox()
         self.exit_combo.addItems(EXIT_MODES.values())
         self.exit_combo.setCurrentIndex(list(EXIT_MODES).index(engine.exit_mode))
@@ -415,7 +667,11 @@ class MainWindow(QMainWindow):
         locked = winsys.is_locked()
         e.override = "breathe" if locked and self.cfg["lock_breathe"] else None
         e.auto_calm = self.cfg["game_calm"] and not locked and winsys.fullscreen_app()
+        prof = None if locked else profiles.match(self.cfg["profiles"], winsys.foreground_exe())
+        e.profile = profiles.Active(prof) if prof else None
         mode = " · игра: спокойный режим" if e.auto_calm else (" · ПК заблокирован" if locked else "")
+        if prof:
+            mode += f" · профиль: {prof['name']}"
         info = e.effect_obj(e.effect).info()
         self.status.setText(f"Клавиатура: {e.status}{mode}" + (f"   ·   {info}" if info else ""))
 
